@@ -7,16 +7,15 @@ coupling between the two trees — they simply import from here.
 from __future__ import annotations
 
 import math
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any
 
-from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.consistency.report import ParamFinding
-
+from freecad_validator.measurement.schema import MeasurementBank
 
 # A candidate is (measured_value, feature_ref_str). Both scalar and
 # vector checks use this shape; the "value" slot is weakly-typed
 # because vectors carry tuples.
-Candidate = Tuple[Any, str]
+Candidate = tuple[Any, str]
 
 
 def rel_err(a: float, b: float, eps: float = 1e-9) -> float:
@@ -25,13 +24,13 @@ def rel_err(a: float, b: float, eps: float = 1e-9) -> float:
 
 
 def closest_scalar(
-    target: float, candidates: List[Candidate],
-) -> Optional[Tuple[float, float, str]]:
+    target: float, candidates: list[Candidate],
+) -> tuple[float, float, str] | None:
     """Return (measured_value, rel_err, feature_ref) of the closest
     candidate by rel_err. Returns None if candidates is empty."""
     if not candidates:
         return None
-    best: Optional[Tuple[float, float, str]] = None
+    best: tuple[float, float, str] | None = None
     for val, feat in candidates:
         err = rel_err(float(target), float(val))
         if best is None or err < best[1]:
@@ -67,7 +66,7 @@ def make_consistent_finding(
     spec_value: Any,
     measured_value: Any,
     unit: str,
-    feature: Optional[str],
+    feature: str | None,
 ) -> ParamFinding:
     return ParamFinding(
         param=param,
@@ -84,7 +83,7 @@ def make_inconsistent_finding(
     spec_value: Any,
     measured_value: Any,
     unit: str,
-    feature: Optional[str],
+    feature: str | None,
     rel_diff: float,
     reason: str,
 ) -> ParamFinding:

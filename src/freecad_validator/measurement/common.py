@@ -7,8 +7,6 @@ shape selection).
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
-
 
 # --- Rounding --------------------------------------------------------------
 
@@ -53,18 +51,18 @@ SKIP_TYPE_IDS = frozenset({
 })
 
 
-def vec(v) -> Tuple[float, float, float]:
+def vec(v) -> tuple[float, float, float]:
     return (float(v.x), float(v.y), float(v.z))
 
 
-def normalize(v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+def normalize(v: tuple[float, float, float]) -> tuple[float, float, float]:
     n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
     if n < 1e-12:
         return (0.0, 0.0, 0.0)
     return (v[0] / n, v[1] / n, v[2] / n)
 
 
-def as_float(value) -> Optional[float]:
+def as_float(value) -> float | None:
     """Unwrap FreeCAD Quantity or plain number to float. Returns None if
     the value isn't coercible (link fields, None, etc.)."""
     if value is None:

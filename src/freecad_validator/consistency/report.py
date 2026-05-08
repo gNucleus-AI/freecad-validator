@@ -6,7 +6,7 @@ aggregate summary, and an optional top-level error.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -14,11 +14,11 @@ from pydantic import BaseModel, Field
 class ParamFinding(BaseModel):
     param: str
     spec_value: Any                              # original spec value (any type)
-    measured_value: Optional[Any] = None         # CAD-side value, or None if not_found
+    measured_value: Any | None = None         # CAD-side value, or None if not_found
     unit: str = ""
-    feature: Optional[str] = None                # feature back-reference (e.g., "Pad.Length")
-    rel_diff: Optional[float] = None             # |spec − measured| / max(|spec|, |measured|)
-    reason: Optional[str] = None                 # short explanation when bucket = inconsistent / not_found
+    feature: str | None = None                # feature back-reference (e.g., "Pad.Length")
+    rel_diff: float | None = None             # |spec − measured| / max(|spec|, |measured|)
+    reason: str | None = None                 # short explanation when bucket = inconsistent / not_found
 
 
 class ReportSummary(BaseModel):
@@ -34,13 +34,13 @@ class ReportSummary(BaseModel):
 class ConsistencyReport(BaseModel):
     spec_name: str
     fcstd_path: str
-    summary: Optional[ReportSummary] = None      # filled by the orchestrator before return
-    consistent: List[ParamFinding] = Field(default_factory=list)
-    inconsistent: List[ParamFinding] = Field(default_factory=list)
-    not_found: List[ParamFinding] = Field(default_factory=list)
-    unexpected_features: List[str] = Field(default_factory=list)
-    feature_health: Dict[str, Any] = Field(default_factory=dict)
-    error: Optional[str] = None
+    summary: ReportSummary | None = None      # filled by the orchestrator before return
+    consistent: list[ParamFinding] = Field(default_factory=list)
+    inconsistent: list[ParamFinding] = Field(default_factory=list)
+    not_found: list[ParamFinding] = Field(default_factory=list)
+    unexpected_features: list[str] = Field(default_factory=list)
+    feature_health: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
 
 
 def compute_summary(report: ConsistencyReport) -> ReportSummary:

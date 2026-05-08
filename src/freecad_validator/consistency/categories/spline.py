@@ -35,8 +35,9 @@ fallback when the spec doesn't declare its own).
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, FrozenSet, Optional, Tuple
 
+from freecad_validator.consistency.categories.base import Category
+from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 # 30° is the most common pressure angle on splines. Only a *fallback*
@@ -51,7 +52,7 @@ DEFAULT_PRESSURE_ANGLE_RAD = math.radians(30.0)
 # `circular_pitch` is tried before `pitch` (which is part of
 # `pitch_diameter`). Multi-token rules (like `{'pitch', 'diameter'}`)
 # win over single-token ones (like `{'pitch'}`) when both could match.
-_CANONICAL_RULES: Tuple[Tuple[str, FrozenSet[str]], ...] = (
+_CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     # Multi-token combinations first
     ("major_diameter",   frozenset({"major", "diameter"})),
     ("minor_diameter",   frozenset({"minor", "diameter"})),
@@ -68,10 +69,10 @@ _CANONICAL_RULES: Tuple[Tuple[str, FrozenSet[str]], ...] = (
 
 # Tokens that mark a key as belonging to the gear category rather than
 # spline, even if a spline context is detected elsewhere in the spec.
-_GEAR_EXCLUSIVE_TOKENS: FrozenSet[str] = frozenset({"gear"})
+_GEAR_EXCLUSIVE_TOKENS: frozenset[str] = frozenset({"gear"})
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -84,7 +85,7 @@ def _is_spline_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify_key(key: str) -> Optional[str]:
+def _classify_key(key: str) -> str | None:
     """Map a spec key to a canonical spline param name via token
     presence. Returns None for keys that don't match any rule or that
     are exclusively gear-coded (e.g. `gear_module`)."""
@@ -99,7 +100,7 @@ def _classify_key(key: str) -> Optional[str]:
     return None
 
 
-def _find_spec_value(spec: StructuredSpec, canonical: str) -> Optional[Tuple[str, float]]:
+def _find_spec_value(spec: StructuredSpec, canonical: str) -> tuple[str, float] | None:
     """Search spec.scalars + spec.counts for any key that classifies as
     `canonical`. Returns (first-matching-key, value) or None."""
     for source in (spec.scalars, spec.counts):
@@ -113,7 +114,7 @@ def derive_params(
     module: float,
     teeth: int,
     pressure_angle_rad: float = DEFAULT_PRESSURE_ANGLE_RAD,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Apply standard involute-spline relations. Pure math.
 
     Textbook external-spline proportions (addendum=m, dedendum=1.25·m)
@@ -151,7 +152,7 @@ def derive_params(
 
 def _extract_base_triple(
     spec: StructuredSpec,
-) -> Optional[Tuple[float, int, float]]:
+) -> tuple[float, int, float] | None:
     """Pull (module, teeth, pressure_angle_rad) from the spec.
 
     Either an explicit `module` OR (`pitch_diameter` + `teeth`) works —
@@ -185,7 +186,7 @@ def _extract_base_triple(
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every spline-derivable
     param in the spec.
 
@@ -209,7 +210,7 @@ def derived_candidates(
     alpha_deg = math.degrees(alpha)
     ref = f"spline.derived(m={module:g}, z={teeth}, α={alpha_deg:.1f}°)"
 
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
         for spec_key in source:
             canonical = _classify_key(spec_key)
@@ -225,14 +226,11 @@ def derived_candidates(
 # wrapper ignores the first argument.
 # ---------------------------------------------------------------------------
 
-from freecad_validator.consistency.categories.base import Category
-from freecad_validator.measurement.schema import MeasurementBank
-
 
 class SplineCategory(Category):
     name = "spline"
 
     def derived_candidates(
         self, bank: MeasurementBank, spec: StructuredSpec,
-    ) -> Dict[str, Tuple[float, str]]:
+    ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

@@ -22,8 +22,8 @@ from __future__ import annotations
 import os
 import sys
 import textwrap
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 
 def _candidate_paths() -> Iterable[Path]:
@@ -51,8 +51,7 @@ def _candidate_paths() -> Iterable[Path]:
     for cellar in (Path("/opt/homebrew/Cellar/freecad"),
                    Path("/usr/local/Cellar/freecad")):
         if cellar.is_dir():
-            for v in sorted(cellar.glob("*/lib"), reverse=True):
-                yield v
+            yield from sorted(cellar.glob("*/lib"), reverse=True)
 
     # Linux distro packages
     for p in (

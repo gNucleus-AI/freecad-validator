@@ -28,8 +28,8 @@ specs' `key_*`) doesn't trigger since it has no hex semantic.
 from __future__ import annotations
 
 import math
-from typing import Dict, FrozenSet, List, Optional, Tuple
 
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
@@ -41,14 +41,14 @@ _ACROSS_CORNERS_FACTOR = 2.0 / math.sqrt(3.0)
 _HEX_HALF_ANGLE_RAD = math.radians(30.0)
 
 # Token groups that mark a spec as hex-related. Any one triggers.
-_TRIGGER_GROUPS: Tuple[FrozenSet[str], ...] = (
+_TRIGGER_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"hex"}),
     frozenset({"across", "flats"}),
     frozenset({"across", "corners"}),
 )
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -62,7 +62,7 @@ def _is_hex_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify_key(key: str) -> Optional[str]:
+def _classify_key(key: str) -> str | None:
     """Map a spec key to a canonical hex dimension."""
     toks = _tokens(key)
     # Specific combinations first
@@ -79,7 +79,7 @@ def _classify_key(key: str) -> Optional[str]:
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every hex-related
     spec param. AF comes from the bank's plane-pair offsets; ACF is
     derived from AF via `2/√3`; angles fall out of regular-hex geometry.
@@ -88,11 +88,11 @@ def derived_candidates(
     if not _is_hex_spec(spec):
         return {}
 
-    plane_pair_cands: List[Tuple[float, str]] = [
+    plane_pair_cands: list[tuple[float, str]] = [
         (pp.offset, f"{pp.id}.offset") for pp in bank.plane_pairs
     ]
 
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
         for spec_key, spec_val in source.items():
             canonical = _classify_key(spec_key)
@@ -134,13 +134,11 @@ def derived_candidates(
 # Category subclass.
 # ---------------------------------------------------------------------------
 
-from freecad_validator.consistency.categories.base import Category
-
 
 class HexCategory(Category):
     name = "hex"
 
     def derived_candidates(
         self, bank: MeasurementBank, spec: StructuredSpec,
-    ) -> Dict[str, Tuple[float, str]]:
+    ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

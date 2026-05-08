@@ -24,7 +24,6 @@ import argparse
 import json
 import logging
 import sys
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -63,7 +62,7 @@ class HeuristicValidator:
     def __init__(
         self,
         *,
-        mass_tolerance: Optional[float] = None,
+        mass_tolerance: float | None = None,
         tol_scalar: float = 0.01,
         tol_pos: float = 0.01,
     ):
@@ -93,7 +92,7 @@ class HeuristicValidator:
         )
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Run geometry similarity + spec consistency scoring on a "

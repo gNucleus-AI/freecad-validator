@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import abc
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from freecad_validator.consistency.compare import (
     as_display_angle,
@@ -17,11 +17,11 @@ from freecad_validator.consistency.compare import (
     make_inconsistent_finding,
     rel_err,
 )
-from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.consistency.report import (
     ConsistencyReport,
     ParamFinding,
 )
+from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 
@@ -43,7 +43,7 @@ class Category(abc.ABC):
     @abc.abstractmethod
     def derived_candidates(
         self, bank: MeasurementBank, spec: StructuredSpec,
-    ) -> Dict[str, Tuple[float, str]]: ...
+    ) -> dict[str, tuple[float, str]]: ...
 
     def apply(
         self, report: ConsistencyReport, bank: MeasurementBank,
@@ -57,7 +57,7 @@ class Category(abc.ABC):
 
 def _reclassify_against(
     report: ConsistencyReport,
-    derived: Dict[str, Tuple[float, str]],
+    derived: dict[str, tuple[float, str]],
     tol_scalar: float,
     category_name: str,
 ) -> None:
@@ -66,8 +66,8 @@ def _reclassify_against(
     derived value and move it to the right bucket."""
 
     def _reclass(
-        findings: List[ParamFinding],
-    ) -> Tuple[List[ParamFinding], List[ParamFinding], List[ParamFinding]]:
+        findings: list[ParamFinding],
+    ) -> tuple[list[ParamFinding], list[ParamFinding], list[ParamFinding]]:
         kept, moved_consistent, moved_inconsistent = [], [], []
         for f in findings:
             if f.param not in derived:

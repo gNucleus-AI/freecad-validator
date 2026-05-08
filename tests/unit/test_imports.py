@@ -30,8 +30,18 @@ def test_subpackages_import():
 def test_categories_are_registered_class_per_file():
     """Each `categories/<name>.py` exposes a `*Category` subclass."""
     from freecad_validator.consistency.categories import (
-        base, box, flange_plate, gear, hex, key, keyway, pin,
-        pulley, spline, spring, washer,
+        base,
+        box,
+        flange_plate,
+        gear,
+        hex,
+        key,
+        keyway,
+        pin,
+        pulley,
+        spline,
+        spring,
+        washer,
     )
 
     for mod in (box, flange_plate, gear, hex, key, keyway, pin,

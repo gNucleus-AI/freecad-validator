@@ -18,6 +18,5 @@ from __future__ import annotations
 from freecad_validator.validator import HeuristicValidator as Validator
 from freecad_validator.validator import ValidationResult
 
-
 __all__ = ["Validator", "ValidationResult"]
 __version__ = "0.1.0.dev0"

@@ -26,13 +26,11 @@ Algorithm:
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, List, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
-
-_LENGTHLIKE_TOKENS: FrozenSet[str] = frozenset({
+_LENGTHLIKE_TOKENS: frozenset[str] = frozenset({
     "length", "width", "height", "depth", "thickness",
 })
 
@@ -42,7 +40,7 @@ _LENGTHLIKE_TOKENS: FrozenSet[str] = frozenset({
 # `<feature>_<dim>` keys — those are owned by feature-specific
 # categories (hex hub, flange head, etc.) or fall back to the generic
 # checker.
-_FEATURE_NOUNS: FrozenSet[str] = frozenset({
+_FEATURE_NOUNS: frozenset[str] = frozenset({
     "head", "hub", "shaft", "neck", "groove", "chamfer", "fillet",
     "rim", "bore", "hole", "lip", "boss", "stud",
     "tooth", "thread", "helix", "spline", "key", "keyway",
@@ -50,11 +48,11 @@ _FEATURE_NOUNS: FrozenSet[str] = frozenset({
 })
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
-def _classify_dim(key: str) -> Optional[str]:
+def _classify_dim(key: str) -> str | None:
     """Return 'length' | 'width' | 'height' | 'depth' | 'thickness' or None."""
     toks = _tokens(key)
     for t in ("length", "width", "depth", "height", "thickness"):
@@ -63,7 +61,7 @@ def _classify_dim(key: str) -> Optional[str]:
     return None
 
 
-def _noun_prefix(key: str) -> Optional[str]:
+def _noun_prefix(key: str) -> str | None:
     """Return the noun prefix of `<noun>_<dim>` when the noun looks like
     a sub-body (car_body, cabin, seat). Returns None when the key has
     no noun prefix OR when the noun is a single-body feature word
@@ -178,10 +176,10 @@ def _best_pair_for_value(pairs, dim: str, target: float):
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     if not _is_box_spec(spec):
         return {}
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     # Don't fire on parts with rich cylindrical content (retaining
     # rings, gears, anything with ≥ 3 clusters). BoxCategory targets
     # purely prismatic compounds (cars, couches, drawers) — those
@@ -216,8 +214,6 @@ def derived_candidates(
 
 
 # ---------------------------------------------------------------------------
-
-from freecad_validator.consistency.categories.base import Category
 
 
 class BoxCategory(Category):

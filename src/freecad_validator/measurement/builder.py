@@ -22,13 +22,11 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import List, Optional
 
 # ``FreeCAD`` is imported lazily inside ``extract()`` so the package
 # can be imported on hosts that haven't installed FreeCAD yet — the
 # import error only surfaces when the user actually tries to score
 # a case.
-
 from .common import pick_representative_shape
 from .detectors import DEFAULT_BANK_DETECTORS, BankDetector
 from .extractors import DEFAULT_SHAPE_EXTRACTORS, ShapeExtractor
@@ -42,8 +40,8 @@ class MeasurementBankBuilder:
 
     def __init__(
         self,
-        extractors: Optional[List[ShapeExtractor]] = None,
-        detectors: Optional[List[BankDetector]] = None,
+        extractors: list[ShapeExtractor] | None = None,
+        detectors: list[BankDetector] | None = None,
     ):
         self.extractors = list(extractors) if extractors is not None else list(DEFAULT_SHAPE_EXTRACTORS)
         self.detectors = list(detectors) if detectors is not None else list(DEFAULT_BANK_DETECTORS)

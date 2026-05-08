@@ -20,7 +20,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.consistency.checker import ConsistencyChecker
@@ -91,7 +90,7 @@ class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
         )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI: run the spec-consistency scorer on a spec JSON + candidate FCStd."""
     parser = argparse.ArgumentParser(
         description=(

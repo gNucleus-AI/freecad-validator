@@ -45,8 +45,8 @@ universal).
 from __future__ import annotations
 
 import math
-from typing import Dict, FrozenSet, Optional, Set, Tuple
 
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
@@ -72,7 +72,7 @@ _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
 # Token-based key classification. Rule order is most-specific first so
 # multi-token combos (like `pitch` + `diameter` → `pitch_diameter`) win
 # over single-token fallbacks.
-_CANONICAL_RULES: Tuple[Tuple[str, FrozenSet[str]], ...] = (
+_CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("diametral_pitch",  frozenset({"diametral", "pitch"})),
     ("circular_pitch",   frozenset({"circular", "pitch"})),
     ("pressure_angle",   frozenset({"pressure", "angle"})),
@@ -93,10 +93,10 @@ _CANONICAL_RULES: Tuple[Tuple[str, FrozenSet[str]], ...] = (
 
 # Tokens that mark a key as belonging to the spline category, so we
 # don't double-claim in specs that use `spline_*` aliases.
-_SPLINE_EXCLUSIVE_TOKENS: FrozenSet[str] = frozenset({"spline"})
+_SPLINE_EXCLUSIVE_TOKENS: frozenset[str] = frozenset({"spline"})
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     """Tokenize by `_`, normalizing `tooth` → `teeth` so either singular
     or plural forms classify the same."""
     return frozenset(
@@ -105,7 +105,7 @@ def _tokens(key: str) -> FrozenSet[str]:
     )
 
 
-def _classify_key(key: str) -> Optional[str]:
+def _classify_key(key: str) -> str | None:
     """Map a spec key to a canonical gear param name via token presence.
     Returns None for keys that are spline-exclusive or don't match any
     rule."""
@@ -118,7 +118,7 @@ def _classify_key(key: str) -> Optional[str]:
     return None
 
 
-def _find_spec_value(spec: StructuredSpec, canonical: str) -> Optional[Tuple[str, float]]:
+def _find_spec_value(spec: StructuredSpec, canonical: str) -> tuple[str, float] | None:
     """Search spec.scalars + spec.counts for a key that classifies as
     `canonical`. Returns (key, value) of first match or None."""
     for source in (spec.scalars, spec.counts):
@@ -132,9 +132,9 @@ def derive_params(
     module: float,
     number_of_teeth: int,
     pressure_angle_rad: float = DEFAULT_PRESSURE_ANGLE_RAD,
-    outer_d: Optional[float] = None,
-    root_d: Optional[float] = None,
-) -> Dict[str, float]:
+    outer_d: float | None = None,
+    root_d: float | None = None,
+) -> dict[str, float]:
     """Apply standard spur-gear relationships to derive expected values.
 
     When `outer_d` and `root_d` are provided (typically measured from
@@ -217,7 +217,7 @@ def derive_params(
     }
 
 
-def measurable_params_from_bank(bank: MeasurementBank) -> Optional[Dict[str, float]]:
+def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | None:
     """Detect the geometry-observable gear base triple:
     `(outer_diameter, root_diameter, teeth)` from the bank. Derive
     `module` from the first two via the ISO whole-depth relation.
@@ -233,7 +233,7 @@ def measurable_params_from_bank(bank: MeasurementBank) -> Optional[Dict[str, flo
     Returns None if fewer than 2 teeth-count-matching radii exist (can't
     pin down both tip and root).
     """
-    teeth_candidates: Set[int] = set()
+    teeth_candidates: set[int] = set()
     for c in bank.cylinder_clusters:
         if c.count >= _MIN_TEETH_FOR_GEAR:
             teeth_candidates.add(c.count)
@@ -246,7 +246,7 @@ def measurable_params_from_bank(bank: MeasurementBank) -> Optional[Dict[str, flo
 
     # Dedupe radii — if a cluster and its derived circular_pattern carry
     # the same radius, we only want it counted once.
-    teeth_match_radii: Set[float] = set()
+    teeth_match_radii: set[float] = set()
     for c in bank.cylinder_clusters:
         if c.count == teeth:
             teeth_match_radii.add(round(c.radius, 6))
@@ -281,7 +281,7 @@ def measurable_params_from_bank(bank: MeasurementBank) -> Optional[Dict[str, flo
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every gear param
     derivable from the bank's measured tip/root radii + teeth count.
 
@@ -333,7 +333,7 @@ def derived_candidates(
         f"α={math.degrees(alpha):.1f}°)"
     )
 
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
         for spec_key in source:
             canonical = _classify_key(spec_key)
@@ -347,13 +347,11 @@ def derived_candidates(
 # Category subclass — thin wrapper over `derived_candidates`.
 # ---------------------------------------------------------------------------
 
-from freecad_validator.consistency.categories.base import Category
-
 
 class GearCategory(Category):
     name = "gear"
 
     def derived_candidates(
         self, bank: MeasurementBank, spec: StructuredSpec,
-    ) -> Dict[str, Tuple[float, str]]:
+    ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

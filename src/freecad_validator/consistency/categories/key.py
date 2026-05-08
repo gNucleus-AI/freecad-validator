@@ -26,13 +26,12 @@ Trigger: ``spec.name`` contains the token ``key`` but NOT ``keyway``
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, List, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -44,14 +43,14 @@ def _is_key_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _aabb_sorted(bank: MeasurementBank) -> Optional[Tuple[float, float, float]]:
+def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     g = bank.globals.get("aabb_sorted")
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
         return None
     return tuple(sorted(float(x) for x in g.value))  # type: ignore[return-value]
 
 
-def _sketch_line_lengths(bank: MeasurementBank) -> List[Tuple[float, str]]:
+def _sketch_line_lengths(bank: MeasurementBank) -> list[tuple[float, str]]:
     """Return [(line_length, feature_ref), ...] from every sketch."""
     out = []
     for ft in bank.feature_tree:
@@ -63,7 +62,7 @@ def _sketch_line_lengths(bank: MeasurementBank) -> List[Tuple[float, str]]:
     return out
 
 
-def _classify(key: str) -> Optional[str]:
+def _classify(key: str) -> str | None:
     toks = _tokens(key)
     if "moon" in toks and "height" in toks:
         return "moon_height"
@@ -78,10 +77,10 @@ def _classify(key: str) -> Optional[str]:
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     if not _is_key_spec(spec):
         return {}
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     aabb = _aabb_sorted(bank)
     line_lengths = _sketch_line_lengths(bank)
 
@@ -117,8 +116,6 @@ def derived_candidates(
 
 
 # ---------------------------------------------------------------------------
-
-from freecad_validator.consistency.categories.base import Category
 
 
 class KeyCategory(Category):

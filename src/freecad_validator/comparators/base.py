@@ -12,7 +12,7 @@ comparators uniformly.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,7 @@ class ComparisonResult(BaseModel):
 
     score: float
     reason: str
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class FCStdBaseComparator(ABC):
@@ -44,7 +44,7 @@ class FCStdBaseComparator(ABC):
         reason instead, so batch runners can surface partial failures."""
 
 
-def partdesign_body_gate(doc) -> Optional[str]:
+def partdesign_body_gate(doc) -> str | None:
     """Spec gate — return a gate-reason string when the doc does not
     contain exactly one non-empty `PartDesign::Body` whose tip Shape
     is a single solid; else return None.

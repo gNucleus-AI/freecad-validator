@@ -24,7 +24,6 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 from .base_parser import SpecBaseParser, StructuredSpec
 
@@ -67,7 +66,7 @@ _KEY_RE = re.compile(r"^\s*(?P<key>[a-z][a-z0-9_]*)\s*")
 _COUNT_HINTS = {"num", "count", "number", "rows", "cols", "columns", "teeth"}
 
 
-def _normalize(value: float, unit: Optional[str]) -> Tuple[float, str]:
+def _normalize(value: float, unit: str | None) -> tuple[float, str]:
     """Convert (value, unit) to (mm | rad | unitless)."""
     if unit is None or unit == "":
         return value, ""
@@ -82,7 +81,7 @@ def _is_count_key(key: str) -> bool:
     return any(token in _COUNT_HINTS for token in key.split("_"))
 
 
-def _parse_scalar(raw: str) -> Optional[Tuple[float, str]]:
+def _parse_scalar(raw: str) -> tuple[float, str] | None:
     """Parse the first number-unit token. Tolerates trailing junk like
     parenthetical notes, so values like `20 mm (derived)` still work."""
     m = _SCALAR_RE.match(raw)
@@ -91,7 +90,7 @@ def _parse_scalar(raw: str) -> Optional[Tuple[float, str]]:
     return _normalize(float(m.group("num")), m.group("unit"))
 
 
-def _parse_vector(raw: str) -> Optional[Tuple[Tuple[float, ...], str]]:
+def _parse_vector(raw: str) -> tuple[tuple[float, ...], str] | None:
     """Parse `(v1, v2[, v3])[unit]`. Components can carry their own unit
     or inherit from a trailing outer unit after the closing paren."""
     raw = raw.strip()
@@ -106,7 +105,7 @@ def _parse_vector(raw: str) -> Optional[Tuple[Tuple[float, ...], str]]:
     outer_unit = outer_unit_match.group("unit") if outer_unit_match else None
 
     components: list[float] = []
-    resolved_unit: Optional[str] = None
+    resolved_unit: str | None = None
     for part in inner.split(","):
         parsed = _parse_scalar(part)
         if parsed is None:
@@ -147,7 +146,7 @@ def _split_chunks(text: str):
             yield "".join(buf)
 
 
-def _parse_chunk(chunk: str) -> Optional[Tuple[str, str, object]]:
+def _parse_chunk(chunk: str) -> tuple[str, str, object] | None:
     """Return (key, kind, value) where kind ∈ {"scalar", "vector", "count"}.
 
     `kind` is derived from the key (count hint) and value shape (parens →
@@ -189,12 +188,12 @@ def _parse_chunk(chunk: str) -> Optional[Tuple[str, str, object]]:
 
 def parse_key_parameters(
     text: str,
-) -> Tuple[Dict[str, float], Dict[str, Tuple[float, ...]], Dict[str, int]]:
+) -> tuple[dict[str, float], dict[str, tuple[float, ...]], dict[str, int]]:
     """Lower-level API — useful for tests that want to parse just the
     key_parameters blob. Returns (scalars, vectors, counts)."""
-    scalars: Dict[str, float] = {}
-    vectors: Dict[str, Tuple[float, ...]] = {}
-    counts: Dict[str, int] = {}
+    scalars: dict[str, float] = {}
+    vectors: dict[str, tuple[float, ...]] = {}
+    counts: dict[str, int] = {}
     for chunk in _split_chunks(text):
         parsed = _parse_chunk(chunk)
         if parsed is None:
@@ -209,7 +208,7 @@ def parse_key_parameters(
     return scalars, vectors, counts
 
 
-def parse_spec(spec: Dict[str, str]) -> StructuredSpec:
+def parse_spec(spec: dict[str, str]) -> StructuredSpec:
     """Parse a spec dict (loaded from the case's .json) into StructuredSpec.
 
     Expected input keys: `name`, `description`, `key_parameters`. Missing
@@ -228,7 +227,7 @@ def parse_spec(spec: Dict[str, str]) -> StructuredSpec:
     )
 
 
-def load_spec_json(path: str | Path) -> Dict[str, str]:
+def load_spec_json(path: str | Path) -> dict[str, str]:
     """Convenience loader: read `path` as JSON → dict. The checker's
     public API is parse_spec(dict); this is just sugar for CLIs/tests."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -241,7 +240,7 @@ class RuleBasedSpecParser(SpecBaseParser):
 
     name = "rule_based"
 
-    def parse_spec(self, spec: Dict[str, str]) -> StructuredSpec:
+    def parse_spec(self, spec: dict[str, str]) -> StructuredSpec:
         return parse_spec(spec)
 
 

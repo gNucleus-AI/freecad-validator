@@ -19,13 +19,12 @@ Geometric anchors:
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -44,7 +43,7 @@ def _is_washer_spec(spec: StructuredSpec) -> bool:
     return True
 
 
-def _aabb_sorted(bank: MeasurementBank) -> Optional[Tuple[float, float, float]]:
+def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     g = bank.globals.get("aabb_sorted")
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
         return None
@@ -61,7 +60,7 @@ def _outer_inner_radii(bank: MeasurementBank):
     return by_r[-1], by_r[0]
 
 
-def _classify(key: str) -> Optional[str]:
+def _classify(key: str) -> str | None:
     toks = _tokens(key)
     if "wall" in toks and "thickness" in toks:
         return "wall_thickness"
@@ -80,10 +79,10 @@ def _classify(key: str) -> Optional[str]:
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     if not _is_washer_spec(spec):
         return {}
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     aabb = _aabb_sorted(bank)
     outer, inner = _outer_inner_radii(bank)
 
@@ -107,8 +106,6 @@ def derived_candidates(
 
 
 # ---------------------------------------------------------------------------
-
-from freecad_validator.consistency.categories.base import Category
 
 
 class WasherCategory(Category):

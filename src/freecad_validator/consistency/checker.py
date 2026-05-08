@@ -18,7 +18,6 @@ from __future__ import annotations
 import importlib.util
 import logging
 from pathlib import Path
-from typing import Dict
 
 from freecad_validator.consistency.categories.base import _reclassify_against
 from freecad_validator.consistency.checks import (
@@ -26,16 +25,15 @@ from freecad_validator.consistency.checks import (
     CheckRegistry,
 )
 from freecad_validator.consistency.compare import as_display_angle
-from freecad_validator.measurement.builder import extract as extract_bank
-from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.consistency.report import (
     ConsistencyReport,
     ParamFinding,
     compute_summary,
 )
+from freecad_validator.measurement.builder import extract as extract_bank
+from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import (
     StructuredSpec,
-    load_spec_json,
     parse_spec,
 )
 
@@ -87,7 +85,7 @@ class ConsistencyChecker:
         self.tol_pos = tol_pos
         self.registry = registry
 
-    def check(self, spec: Dict[str, str], fcstd_path: str | Path) -> ConsistencyReport:
+    def check(self, spec: dict[str, str], fcstd_path: str | Path) -> ConsistencyReport:
         structured = parse_spec(spec)
         fcstd_path_s = str(fcstd_path)
 
@@ -213,7 +211,7 @@ def _append(report: ConsistencyReport, bucket: str, finding: ParamFinding) -> No
 
 
 def check(
-    spec: Dict[str, str],
+    spec: dict[str, str],
     fcstd_path: str | Path,
     *,
     tol_scalar: float = 0.01,

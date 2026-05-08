@@ -29,16 +29,14 @@ import argparse
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.comparators.geometry import (
     VOLUME_MATCHED_REL_TOL,
     GeometryComparator,
 )
-
 from freecad_validator.scorers.base import FCStdBaseScorer
-
 
 COMPARATOR_WEIGHTS = {
     "surface_types": 0.10,
@@ -49,8 +47,8 @@ COMPARATOR_WEIGHTS = {
 
 
 def combine_subscores(
-    subscores: Dict[str, float],
-    weights: Dict[str, float] = COMPARATOR_WEIGHTS,
+    subscores: dict[str, float],
+    weights: dict[str, float] = COMPARATOR_WEIGHTS,
 ) -> float:
     """Heuristic similarity score in [0, 1] from per-aspect subscores.
 
@@ -68,8 +66,8 @@ def _format_reason(
     candidate_fcstd: str,
     overall: float,
     solid_count: int,
-    subscores: Dict[str, float],
-    geom_details: Dict[str, Any],
+    subscores: dict[str, float],
+    geom_details: dict[str, Any],
 ) -> str:
     part_a = os.path.basename(reference_fcstd)
     part_b = os.path.basename(candidate_fcstd)
@@ -123,11 +121,10 @@ class HeuristicGeometryScorer(FCStdBaseScorer):
         )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI: compute the heuristic geometry similarity score between two
     FreeCAD parts. Runs GeometryComparator on the reference and candidate
     `.FCStd`, combines the subscores, prints 0..1 score + reason."""
-    import FreeCAD  # type: ignore
 
     parser = argparse.ArgumentParser(
         description=(

@@ -35,13 +35,13 @@ Geometric anchors:
 from __future__ import annotations
 
 import math
-from typing import Dict, FrozenSet, Optional, Tuple
 
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -61,7 +61,7 @@ def _is_spring_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify(key: str) -> Optional[str]:
+def _classify(key: str) -> str | None:
     toks = _tokens(key)
     # Skip qualifiers that name end-features rather than the spring
     # body — those are out of scope.
@@ -89,7 +89,7 @@ def _classify(key: str) -> Optional[str]:
     return None
 
 
-def _disc_cone_height(bank: MeasurementBank) -> Optional[Tuple[float, str]]:
+def _disc_cone_height(bank: MeasurementBank) -> tuple[float, str] | None:
     """Derive cone_height for disc springs / Belleville washers.
 
     A disc spring has TWO categories of conic surfaces:
@@ -121,13 +121,13 @@ def _disc_cone_height(bank: MeasurementBank) -> Optional[Tuple[float, str]]:
     return cone_height, f"spring.disc(aabb[min] − edge_cone.axial_extent={thickness:.3f})"
 
 
-def _helix_angle_from_sketches(bank: MeasurementBank, target_rad: float) -> Optional[Tuple[float, str]]:
+def _helix_angle_from_sketches(bank: MeasurementBank, target_rad: float) -> tuple[float, str] | None:
     """Sweep all sketch line angles and constraint angles. For each
     candidate angle ``a``, also consider its complement ``π/2 − a`` —
     the helix's inclined line is between two complementary
     conventions. Return whichever value is closest to `target_rad`.
     """
-    best: Optional[Tuple[float, float, str]] = None  # (err, value, ref)
+    best: tuple[float, float, str] | None = None  # (err, value, ref)
     for sp in bank.sketch_profiles:
         for source_name, src in (("LineAngle", sp.line_angles),
                                  ("ConstraintAngle", sp.constraint_angles)):
@@ -143,7 +143,7 @@ def _helix_angle_from_sketches(bank: MeasurementBank, target_rad: float) -> Opti
     return best[1], best[2]
 
 
-def _aabb_sorted(bank: MeasurementBank) -> Optional[Tuple[float, float, float]]:
+def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     g = bank.globals.get("aabb_sorted")
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
         return None
@@ -160,10 +160,10 @@ def _outer_inner_radii(bank: MeasurementBank):
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     if not _is_spring_spec(spec):
         return {}
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     aabb = _aabb_sorted(bank)
     outer, inner = _outer_inner_radii(bank)
 
@@ -247,8 +247,6 @@ def derived_candidates(
 
 
 # ---------------------------------------------------------------------------
-
-from freecad_validator.consistency.categories.base import Category
 
 
 class SpringCategory(Category):

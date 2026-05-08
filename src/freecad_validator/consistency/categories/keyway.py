@@ -35,8 +35,7 @@ Uses token-based key classification like gear / spline categories.
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, List, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
@@ -48,10 +47,10 @@ _TRIGGER_TOKEN = "keyway"
 # Once triggered, any key with `keyway` OR `key` token is claimable —
 # `key_*` keys describe the mating key piece whose dimensions match
 # the shaft's keyway by fit.
-_CATEGORY_TOKENS: FrozenSet[str] = frozenset({"keyway", "key"})
+_CATEGORY_TOKENS: frozenset[str] = frozenset({"keyway", "key"})
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -63,7 +62,7 @@ def _is_keyway_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify_key(key: str) -> Optional[str]:
+def _classify_key(key: str) -> str | None:
     """Map a spec key to a canonical keyway dimension via token presence.
     Returns one of {"width", "depth", "length", "count"} or None."""
     toks = _tokens(key)
@@ -83,7 +82,7 @@ def _classify_key(key: str) -> Optional[str]:
     return None
 
 
-def _closest(candidates: List[Tuple[float, str]], value: float) -> Optional[Tuple[float, str]]:
+def _closest(candidates: list[tuple[float, str]], value: float) -> tuple[float, str] | None:
     if not candidates:
         return None
     return min(candidates, key=lambda c: abs(c[0] - value))
@@ -91,7 +90,7 @@ def _closest(candidates: List[Tuple[float, str]], value: float) -> Optional[Tupl
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every keyway-related
     spec key, sourcing candidate values from the bank's plane-pair
     offsets (widths/depths), feature-tree lengths, and cluster/pattern
@@ -100,7 +99,7 @@ def derived_candidates(
     if not _is_keyway_spec(spec):
         return {}
 
-    plane_pair_cands: List[Tuple[float, str]] = [
+    plane_pair_cands: list[tuple[float, str]] = [
         (pp.offset, f"{pp.id}.offset") for pp in bank.plane_pairs
     ]
 
@@ -113,7 +112,7 @@ def derived_candidates(
     # are useful here (a single repeated length is a square or strip).
     for sp in bank.sketch_profiles:
         # Collapse near-duplicates so a 4-sided rectangle yields 2 entries.
-        unique: List[float] = []
+        unique: list[float] = []
         for ln in sp.line_lengths:
             if not unique or abs(ln - unique[-1]) / max(abs(ln), abs(unique[-1]), 1e-9) > 1e-3:
                 unique.append(ln)
@@ -125,13 +124,13 @@ def derived_candidates(
     # For axial length: feature-tree `Length` properties plus plane-pair
     # offsets (an Extrude may carry the slot's axial length, but so can a
     # plane-pair between the two slot end-caps).
-    length_cands: List[Tuple[float, str]] = list(plane_pair_cands)
+    length_cands: list[tuple[float, str]] = list(plane_pair_cands)
     for entry in bank.feature_tree:
         for prop in ("Length", "Length2", "Height", "Depth", "Width"):
             if prop in entry.properties:
                 length_cands.append((entry.properties[prop], f"{entry.name}.{prop}"))
 
-    count_cands: List[Tuple[float, str]] = [
+    count_cands: list[tuple[float, str]] = [
         (float(c.count), f"{c.id}.count") for c in bank.cylinder_clusters
     ]
     count_cands.extend(
@@ -163,7 +162,7 @@ def derived_candidates(
                 f"{entry.name} rectangle count ({n_lines} lines ÷ 4)",
             ))
 
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
         for spec_key, spec_val in source.items():
             canonical = _classify_key(spec_key)
@@ -191,13 +190,11 @@ def derived_candidates(
 # Category subclass.
 # ---------------------------------------------------------------------------
 
-from freecad_validator.consistency.categories.base import Category
-
 
 class KeywayCategory(Category):
     name = "keyway"
 
     def derived_candidates(
         self, bank: MeasurementBank, spec: StructuredSpec,
-    ) -> Dict[str, Tuple[float, str]]:
+    ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

@@ -18,11 +18,10 @@ import json
 import shutil
 import statistics
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
 
 from freecad_validator import Validator
-
 
 # ---------------------------------------------------------------------------
 # `validate` — score one (candidate, reference, spec) triple
@@ -77,7 +76,7 @@ def _add_batch_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tol-pos", type=float, default=0.01)
 
 
-def _stats(values: List[float]) -> dict:
+def _stats(values: list[float]) -> dict:
     if not values:
         return {"n": 0, "mean": None, "median": None, "min": None, "max": None}
     return {
@@ -89,7 +88,7 @@ def _stats(values: List[float]) -> dict:
     }
 
 
-def _find_spec_json(case_dir: Path) -> Optional[Path]:
+def _find_spec_json(case_dir: Path) -> Path | None:
     """Locate the spec JSON inside a case directory.
 
     Search order:
@@ -116,7 +115,7 @@ def _find_spec_json(case_dir: Path) -> Optional[Path]:
     return None
 
 
-def _validate_one(case_dir: Path, validator: Validator) -> Tuple[str, dict]:
+def _validate_one(case_dir: Path, validator: Validator) -> tuple[str, dict]:
     cid = case_dir.name
     candidate = case_dir / "candidate.FCStd"
     reference = case_dir / "reference.FCStd"
@@ -159,9 +158,9 @@ def _run_batch(args: argparse.Namespace) -> int:
 
     validator = Validator(tol_scalar=args.tol_scalar, tol_pos=args.tol_pos)
     rows = []
-    geom_scores: List[float] = []
-    spec_scores: List[float] = []
-    combined: List[float] = []
+    geom_scores: list[float] = []
+    spec_scores: list[float] = []
+    combined: list[float] = []
     n_err = 0
 
     cases = list(_iter_cases(data_dir))
@@ -240,7 +239,7 @@ def _add_join_args(p: argparse.ArgumentParser) -> None:
                    help="rmtree --output-dir first instead of merging into it")
 
 
-def _candidate_fcstd(case_dir: Path) -> Optional[Path]:
+def _candidate_fcstd(case_dir: Path) -> Path | None:
     """Find the candidate's FCStd. Defaults to ``answer.FCStd``;
     falls back to any ``*.FCStd`` so hand-curated dirs work too."""
     p = case_dir / "answer.FCStd"
@@ -252,7 +251,7 @@ def _candidate_fcstd(case_dir: Path) -> Optional[Path]:
     return None
 
 
-def _reference_fcstd(case_dir: Path) -> Optional[Path]:
+def _reference_fcstd(case_dir: Path) -> Path | None:
     """Find the reference's FCStd. Defaults to ``<id>_parameterized.FCStd``;
     falls back to any ``*.FCStd``."""
     cid = case_dir.name
@@ -284,9 +283,9 @@ def _run_join(args: argparse.Namespace) -> int:
     ref_ids = {p.name for p in ref_data.iterdir() if p.is_dir()}
     shared = cand_ids & ref_ids
 
-    matched: List[str] = []
-    skipped_no_cand: List[str] = []
-    skipped_no_ref: List[str] = []
+    matched: list[str] = []
+    skipped_no_cand: list[str] = []
+    skipped_no_ref: list[str] = []
     for cid in sorted(shared):
         cand_case = cand_data / cid
         ref_case = ref_data / cid
@@ -334,7 +333,7 @@ _SUBCOMMANDS = (
 )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="freecad-validator",
         description=__doc__,

@@ -25,13 +25,12 @@ Geometric anchors:
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -50,7 +49,7 @@ def _is_pulley_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify(key: str) -> Optional[str]:
+def _classify(key: str) -> str | None:
     toks = _tokens(key)
     # Skip tooth-profile and groove-profile sub-dimensions — those need
     # 2D-sketch analysis and would be wildly mis-anchored if we tried
@@ -74,7 +73,7 @@ def _classify(key: str) -> Optional[str]:
     return None
 
 
-def _aabb_sorted(bank: MeasurementBank) -> Optional[Tuple[float, float, float]]:
+def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     g = bank.globals.get("aabb_sorted")
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
         return None
@@ -91,10 +90,10 @@ def _outer_inner_radii(bank: MeasurementBank):
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     if not _is_pulley_spec(spec):
         return {}
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     aabb = _aabb_sorted(bank)
     outer, inner = _outer_inner_radii(bank)
 
@@ -121,8 +120,6 @@ def derived_candidates(
 
 
 # ---------------------------------------------------------------------------
-
-from freecad_validator.consistency.categories.base import Category
 
 
 class PulleyCategory(Category):

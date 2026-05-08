@@ -1,7 +1,8 @@
 """Report renderers — text (terminal), markdown (LLM-friendly), JSON."""
 from __future__ import annotations
 
-from typing import Any, Callable, Dict
+from collections.abc import Callable
+from typing import Any
 
 from freecad_validator.consistency.report import ConsistencyReport
 
@@ -142,10 +143,10 @@ def render_json(report: ConsistencyReport) -> str:
     return report.model_dump_json(indent=2)
 
 
-RENDERERS: Dict[str, Callable[[ConsistencyReport], str]] = {
+RENDERERS: dict[str, Callable[[ConsistencyReport], str]] = {
     "text":     render_text,
     "markdown": render_markdown,
     "json":     render_json,
 }
 
-EXT_FOR_FORMAT: Dict[str, str] = {"text": "txt", "markdown": "md", "json": "json"}
+EXT_FOR_FORMAT: dict[str, str] = {"text": "txt", "markdown": "md", "json": "json"}

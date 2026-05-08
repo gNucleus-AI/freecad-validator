@@ -24,23 +24,22 @@ so either one is sufficient.
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, List, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 # Tokens that mark a spec as flange-plate-related. Any one triggers.
-_TRIGGER_TOKENS: FrozenSet[str] = frozenset({"plate", "lug"})
+_TRIGGER_TOKENS: frozenset[str] = frozenset({"plate", "lug"})
 
 # Tokens that resolve a key to a plate in-plane dimension. We treat
 # width / length / height the same way — for square plates they're
 # equal anyway; for rectangular plates the difference between aabb's
 # 2nd- and 1st-largest axis is what distinguishes them.
-_PLATE_DIM_TOKENS: FrozenSet[str] = frozenset({"width", "length", "height", "size"})
-_PLATE_THICK_TOKENS: FrozenSet[str] = frozenset({"thickness", "thick"})
+_PLATE_DIM_TOKENS: frozenset[str] = frozenset({"width", "length", "height", "size"})
+_PLATE_THICK_TOKENS: frozenset[str] = frozenset({"thickness", "thick"})
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -52,7 +51,7 @@ def _is_flange_plate_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify_plate_key(key: str) -> Optional[str]:
+def _classify_plate_key(key: str) -> str | None:
     """Return 'width', 'height', 'thickness', 'lug_edge', 'bolt_count' or None."""
     toks = _tokens(key)
     if "lug" in toks:
@@ -77,7 +76,7 @@ def _classify_plate_key(key: str) -> Optional[str]:
     return None
 
 
-def _aabb_sorted(bank: MeasurementBank) -> Optional[Tuple[float, float, float]]:
+def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     """Return (min, mid, max) ascending from the global aabb_sorted measurement,
     or None if not present."""
     g = bank.globals.get("aabb_sorted")
@@ -91,11 +90,11 @@ def _aabb_sorted(bank: MeasurementBank) -> Optional[Tuple[float, float, float]]:
 
 def _best_line_length_match(
     bank: MeasurementBank, target: float, tol: float = 0.5,
-) -> Optional[Tuple[float, str]]:
+) -> tuple[float, str] | None:
     """Find the sketch LineLength property whose value is closest to `target`.
     Returns (value, "<sketch_name>.<prop_key>") or None if no LineLength
     entry comes within `tol` (relative)."""
-    best: Optional[Tuple[float, str, float]] = None  # (value, ref, abs_err)
+    best: tuple[float, str, float] | None = None  # (value, ref, abs_err)
     for ft in bank.feature_tree:
         for prop_key, val in ft.properties.items():
             if "LineLength" not in prop_key:
@@ -111,7 +110,7 @@ def _best_line_length_match(
     return val, ref
 
 
-def _bolt_hole_count(bank: MeasurementBank) -> Optional[Tuple[int, str]]:
+def _bolt_hole_count(bank: MeasurementBank) -> tuple[int, str] | None:
     """Pick the cluster that looks like the bolt-hole pattern: concave
     (a hole), count >= 2, and the smallest such radius (bolts are usually
     the smallest holes — the central bore is concave too but bigger and
@@ -126,7 +125,7 @@ def _bolt_hole_count(bank: MeasurementBank) -> Optional[Tuple[int, str]]:
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every flange-plate
     spec param the category can derive. Empty if the spec isn't
     flange-plate-related."""
@@ -134,7 +133,7 @@ def derived_candidates(
         return {}
 
     aabb = _aabb_sorted(bank)
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
 
     for source in (spec.scalars, spec.counts):
         for spec_key, spec_val in source.items():
@@ -172,13 +171,11 @@ def derived_candidates(
 # Category subclass.
 # ---------------------------------------------------------------------------
 
-from freecad_validator.consistency.categories.base import Category
-
 
 class FlangePlateCategory(Category):
     name = "flange_plate"
 
     def derived_candidates(
         self, bank: MeasurementBank, spec: StructuredSpec,
-    ) -> Dict[str, Tuple[float, str]]:
+    ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -49,7 +48,7 @@ _GRID_SPACING_REL_TOL = 0.05
 _GRID_BIN_FRAC_TOL = 0.05
 
 
-def _bin_projections(values: np.ndarray, tol: float) -> Optional[Tuple[int, float, float]]:
+def _bin_projections(values: np.ndarray, tol: float) -> tuple[int, float, float] | None:
     """Group sorted 1D values into bins (within `tol`). Return
     (num_bins, mean_spacing, min_center) or None if the bin spacing is
     not approximately uniform. Single-bin input returns spacing 0.0."""
@@ -60,7 +59,7 @@ def _bin_projections(values: np.ndarray, tol: float) -> Optional[Tuple[int, floa
     if spread < tol:
         return 1, 0.0, float(vals[0])
 
-    bins: List[List[float]] = [[float(vals[0])]]
+    bins: list[list[float]] = [[float(vals[0])]]
     for v in vals[1:]:
         if float(v) - bins[-1][-1] < tol:
             bins[-1].append(float(v))
@@ -82,8 +81,8 @@ def _bin_projections(values: np.ndarray, tol: float) -> Optional[Tuple[int, floa
 
 
 def _detect_grid_from_points(
-    points: List[Tuple[float, float, float]],
-) -> Optional[Tuple[int, int, float, float, Tuple[float, float, float]]]:
+    points: list[tuple[float, float, float]],
+) -> tuple[int, int, float, float, tuple[float, float, float]] | None:
     """Return (rows, cols, spacing_rows, spacing_cols, origin_xyz) if the
     given 3D points form a rectangular grid (including the 1×N degenerate
     case). `rows <= cols` always; spacing_rows is the spacing along the
@@ -141,12 +140,12 @@ class LinearPatternDetector(BankDetector):
     name = "grids"
 
     def detect(self, *, bank: MeasurementBank) -> None:
-        grids: List[GridSummary] = []
+        grids: list[GridSummary] = []
         grid_idx = 0
 
         # Sketch-level: group CircleCenter/CircleRadius pairs by radius.
         for entry in bank.feature_tree:
-            circles: List[Tuple[int, float, Tuple[float, float, float]]] = []
+            circles: list[tuple[int, float, tuple[float, float, float]]] = []
             for prop_key, radius in entry.properties.items():
                 if "CircleRadius" not in prop_key:
                     continue
@@ -162,7 +161,7 @@ class LinearPatternDetector(BankDetector):
             if not circles:
                 continue
 
-            by_radius: Dict[float, List[Tuple[float, float, float]]] = {}
+            by_radius: dict[float, list[tuple[float, float, float]]] = {}
             for _idx, r, c in circles:
                 key = round(r, 6)
                 by_radius.setdefault(key, []).append(c)
@@ -222,9 +221,9 @@ _CIRCULAR_PITCH_REL_TOL = 0.05
 
 
 def _detect_circular_from_points(
-    points: List[Tuple[float, float, float]],
-    axis_hint: Optional[Tuple[float, float, float]] = None,
-) -> Optional[Tuple[int, float, Tuple[float, float, float], Tuple[float, float, float], float]]:
+    points: list[tuple[float, float, float]],
+    axis_hint: tuple[float, float, float] | None = None,
+) -> tuple[int, float, tuple[float, float, float], tuple[float, float, float], float] | None:
     """Return (count, pattern_radius, center, axis, angular_pitch_rad)
     if `points` form an N-fold circular pattern (N ≥ 3). Else None.
 
@@ -265,8 +264,8 @@ def _detect_circular_from_points(
     e2 = np.cross(axis, e1)
 
     mean_pt = arr.mean(axis=0)
-    radii: List[float] = []
-    thetas: List[float] = []
+    radii: list[float] = []
+    thetas: list[float] = []
     for p in arr:
         v = p - mean_pt
         perp = v - np.dot(v, axis) * axis
@@ -285,7 +284,7 @@ def _detect_circular_from_points(
         return None
 
     thetas_sorted = sorted(thetas)
-    gaps: List[float] = []
+    gaps: list[float] = []
     for i in range(n):
         j = (i + 1) % n
         gap = thetas_sorted[j] - thetas_sorted[i]
@@ -311,11 +310,11 @@ class CircularPatternDetector(BankDetector):
     name = "circular_patterns"
 
     def detect(self, *, bank: MeasurementBank) -> None:
-        patterns: List[CircularPatternSummary] = []
+        patterns: list[CircularPatternSummary] = []
         idx = 0
 
         for entry in bank.feature_tree:
-            circles: List[Tuple[int, float, Tuple[float, float, float]]] = []
+            circles: list[tuple[int, float, tuple[float, float, float]]] = []
             for prop_key, radius in entry.properties.items():
                 if "CircleRadius" not in prop_key:
                     continue
@@ -330,7 +329,7 @@ class CircularPatternDetector(BankDetector):
             if not circles:
                 continue
 
-            by_radius: Dict[float, List[Tuple[float, float, float]]] = {}
+            by_radius: dict[float, list[tuple[float, float, float]]] = {}
             for _i, r, c in circles:
                 by_radius.setdefault(round(r, 6), []).append(c)
 
@@ -404,20 +403,20 @@ class SketchProfileDetector(BankDetector):
     name = "sketch_profile"
 
     @staticmethod
-    def _values(props, prefix: str, suffix: str) -> List[float]:
+    def _values(props, prefix: str, suffix: str) -> list[float]:
         out = [v for k, v in props.items()
                if k.startswith(prefix) and k.endswith(suffix)
                and isinstance(v, (int, float))]
         return sorted((float(v) for v in out), reverse=True)
 
     @staticmethod
-    def _line_angles(props) -> List[float]:
+    def _line_angles(props) -> list[float]:
         out = [v for k, v in props.items()
                if k.startswith("LineAngle[") and isinstance(v, (int, float))]
         return sorted((float(v) for v in out), reverse=True)
 
     @staticmethod
-    def _constraint_angles(props) -> List[float]:
+    def _constraint_angles(props) -> list[float]:
         out = [v for k, v in props.items()
                if k.startswith("Constraint[") and k.endswith(".Angle")
                and isinstance(v, (int, float))]
@@ -439,7 +438,7 @@ class SketchProfileDetector(BankDetector):
             bank.sketch_profiles.append(profile)
 
 
-DEFAULT_BANK_DETECTORS: List[BankDetector] = [
+DEFAULT_BANK_DETECTORS: list[BankDetector] = [
     LinearPatternDetector(),
     CircularPatternDetector(),
     SketchProfileDetector(),

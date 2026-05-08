@@ -16,13 +16,12 @@ Geometric anchors:
 """
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, Optional, Tuple
-
+from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
 
-def _tokens(key: str) -> FrozenSet[str]:
+def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
@@ -39,7 +38,7 @@ def _is_pin_spec(spec: StructuredSpec) -> bool:
     return False
 
 
-def _classify(key: str) -> Optional[str]:
+def _classify(key: str) -> str | None:
     """'length' | 'diameter' | 'chamfer_length' | 'rounded_end_height' | None.
 
     `chamfer_length` is derived from axial-extent diffs; on tapered
@@ -62,7 +61,7 @@ def _classify(key: str) -> Optional[str]:
     return None
 
 
-def _rounded_end_height(bank: MeasurementBank) -> Optional[Tuple[float, str]]:
+def _rounded_end_height(bank: MeasurementBank) -> tuple[float, str] | None:
     """A taper / rounded-end pin's main body is a Cone surface that
     spans most of the part's axial extent; the small remainder
     (aabb_max − cone.axial_extent) splits between the two rounded
@@ -81,7 +80,7 @@ def _rounded_end_height(bank: MeasurementBank) -> Optional[Tuple[float, str]]:
     return gap / 2.0, f"pin.(aabb[max] − {largest_cone.id}.axial_extent)/2"
 
 
-def _chamfer_length_from_axial(bank: MeasurementBank) -> Optional[Tuple[float, str]]:
+def _chamfer_length_from_axial(bank: MeasurementBank) -> tuple[float, str] | None:
     """Derive chamfer_length from axial extents.
 
     A coiled or chamfered cylindrical pin has TWO distinct axial
@@ -101,7 +100,7 @@ def _chamfer_length_from_axial(bank: MeasurementBank) -> Optional[Tuple[float, s
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
         return None
     aabb_max = float(max(g.value))
-    best: Optional[Tuple[float, float, str]] = None  # (chamfer, diff, ref)
+    best: tuple[float, float, str] | None = None  # (chamfer, diff, ref)
     for c in bank.cylinder_clusters:
         ax = float(c.axial_extent)
         diff = aabb_max - ax
@@ -122,7 +121,7 @@ def _chamfer_length_from_axial(bank: MeasurementBank) -> Optional[Tuple[float, s
     return best[0], best[2]
 
 
-def _chamfer_length_from_sketch(bank: MeasurementBank) -> Optional[Tuple[float, str]]:
+def _chamfer_length_from_sketch(bank: MeasurementBank) -> tuple[float, str] | None:
     """Solid-pin chamfer detection. The chamfer profile is a revolved
     triangle whose sketch carries a leg length ``L`` (axial leg = the
     chamfer_length) and a hypotenuse ``H``, where ``H² ≈ L_axial² +
@@ -142,7 +141,7 @@ def _chamfer_length_from_sketch(bank: MeasurementBank) -> Optional[Tuple[float, 
         if not sp.line_lengths:
             continue
         # Distinct values (group near-equal).
-        unique: list[Tuple[float, int]] = []
+        unique: list[tuple[float, int]] = []
         for ln in sorted(sp.line_lengths):
             if not unique or abs(ln - unique[-1][0]) / max(abs(ln), abs(unique[-1][0]), 1e-9) > 1e-3:
                 unique.append((ln, 1))
@@ -170,7 +169,7 @@ def _chamfer_length_from_sketch(bank: MeasurementBank) -> Optional[Tuple[float, 
     return None
 
 
-def _aabb_max(bank: MeasurementBank) -> Optional[float]:
+def _aabb_max(bank: MeasurementBank) -> float | None:
     g = bank.globals.get("aabb_sorted")
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
         return None
@@ -186,7 +185,7 @@ def _principal_convex_cyl(bank: MeasurementBank):
     return max(convex, key=lambda c: c.radius * c.axial_extent)
 
 
-def _spec_value(spec: StructuredSpec, key: str) -> Optional[float]:
+def _spec_value(spec: StructuredSpec, key: str) -> float | None:
     """Return spec.scalars[key] (or counts[key]) as a float, or None."""
     for source in (spec.scalars, spec.counts):
         if key in source:
@@ -197,7 +196,7 @@ def _spec_value(spec: StructuredSpec, key: str) -> Optional[float]:
     return None
 
 
-def _head_thickness(spec: StructuredSpec) -> Optional[float]:
+def _head_thickness(spec: StructuredSpec) -> float | None:
     """Find a head_thickness-like spec value (head_thickness, head_height,
     head_length). Returns the value in mm or None."""
     for source in (spec.scalars, spec.counts):
@@ -213,10 +212,10 @@ def _head_thickness(spec: StructuredSpec) -> Optional[float]:
 
 def derived_candidates(
     bank: MeasurementBank, spec: StructuredSpec,
-) -> Dict[str, Tuple[float, str]]:
+) -> dict[str, tuple[float, str]]:
     if not _is_pin_spec(spec):
         return {}
-    out: Dict[str, Tuple[float, str]] = {}
+    out: dict[str, tuple[float, str]] = {}
     aabb_max = _aabb_max(bank)
     main = _principal_convex_cyl(bank)
     head_t = _head_thickness(spec)
@@ -252,8 +251,6 @@ def derived_candidates(
 
 
 # ---------------------------------------------------------------------------
-
-from freecad_validator.consistency.categories.base import Category
 
 
 class PinCategory(Category):
