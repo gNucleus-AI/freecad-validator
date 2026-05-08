@@ -60,18 +60,16 @@ def _linux_mod_dirs(lib_dir: Path) -> Iterable[Path]:
     """Yield workbench/Mod directories that pair with a Linux ``lib``
     candidate. FreeCAD on apt/PPA installs splits the binding (under
     ``/usr/lib/freecad*/lib``) from its Python workbenches (under
-    ``/usr/lib/freecad*/lib/Mod`` and ``/usr/share/freecad*/Mod``);
-    the workbenches need to be on ``sys.path`` for ``FreeCAD.open()``
-    to deserialize ``Part``/``Sketcher``/``PartDesign`` objects.
-
-    Both ``freecad`` and ``freecad-python3`` packages typically share
-    ``/usr/share/freecad/Mod``, so we yield every plausible Mod root
-    and let the caller filter by :meth:`Path.is_dir`."""
-    # Sibling Mod next to the binding (e.g. /usr/lib/freecad/lib/Mod).
-    yield lib_dir / "Mod"
-    # Distro-shared workbench trees.
+    ``/usr/lib/freecad*/Mod`` and ``/usr/share/freecad*/Mod``); the
+    workbenches need to be on ``sys.path`` for ``FreeCAD.open()`` to
+    deserialize ``Part``/``Sketcher``/``PartDesign`` objects. The
+    caller filters by :meth:`Path.is_dir`."""
+    # Mod sits next to ``lib`` under the package root, e.g.
+    # /usr/lib/freecad/Mod (often a symlink into /usr/share/freecad/Mod).
+    yield lib_dir.parent / "Mod"
+    # Canonical workbench tree on apt/PPA, in case the symlink above
+    # is absent (custom builds, relocated installs).
     yield Path("/usr/share/freecad/Mod")
-    yield Path("/usr/share/freecad-python3/Mod")
 
 
 def _looks_like_freecad_lib(d: Path) -> bool:

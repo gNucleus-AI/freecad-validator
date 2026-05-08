@@ -39,9 +39,10 @@ in one variable:
 # workbenches relative to the binary.
 export FREECAD_LIB=/Applications/FreeCAD.app/Contents/Resources/lib
 
-# Linux (apt / PPA install) — three paths: the binding, the bundled
-# workbenches under lib/Mod, and the shared workbench tree.
-export FREECAD_LIB=/usr/lib/freecad/lib:/usr/lib/freecad/lib/Mod:/usr/share/freecad/Mod
+# Linux (apt / PPA install) — three paths: the binding under lib/,
+# the package-root Mod (often a symlink to /usr/share/freecad/Mod),
+# and the canonical workbench tree itself.
+export FREECAD_LIB=/usr/lib/freecad/lib:/usr/lib/freecad/Mod:/usr/share/freecad/Mod
 ```
 
 Verify the wiring:
@@ -157,3 +158,6 @@ Define `derived_candidates(bank, spec)` that returns
 ## License
 
 Apache 2.0 — see [`LICENSE`](LICENSE).
+
+This project depends on [FreeCAD](https://www.freecad.org/), which is
+licensed under LGPL 2.1+. FreeCAD is not bundled with this package.
