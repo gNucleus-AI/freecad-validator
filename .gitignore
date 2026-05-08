@@ -1,0 +1,29 @@
+# Python build/cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Coverage
+.coverage
+htmlcov/
+
+# Sphinx / mkdocs
+site/
+_build/

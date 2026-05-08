@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "gnucleus-freecad-validator"
+version = "0.1.0.dev0"
+description = "Validation tool for parameterized FreeCAD models. Given a design spec describing a CAD model's key parameters and a reference (ground-truth) .FCStd, the validator checks whether a candidate model is consistent with both the spec and the reference."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "gNucleus AI" }]
+keywords = ["freecad", "cad", "validator", "benchmark", "spec", "geometry"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "pydantic >= 2.0",
+    "numpy >= 1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest >= 7.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+docs = [
+    "mkdocs-material",
+    "mkdocstrings[python]",
+]
+
+[project.urls]
+Homepage = "https://github.com/gNucleus-AI/freecad-validator"
+Repository = "https://github.com/gNucleus-AI/freecad-validator"
+Issues = "https://github.com/gNucleus-AI/freecad-validator/issues"
+
+[project.scripts]
+freecad-validator = "freecad_validator.cli.main:main"
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/freecad_validator"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"
+markers = [
+    "needs_freecad: test requires the FreeCAD Python module to be importable",
+]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]   # let formatter handle long lines
+
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true   # FreeCAD has no type stubs
