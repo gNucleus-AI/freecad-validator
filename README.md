@@ -16,7 +16,8 @@ Deterministic, reproducible, no LLM, no GPU.
 | Windows | [installer](https://www.freecad.org/downloads.php) |
 
 For Ubuntu / Debian, the distro's default package is often older than
-0.21. Use the official PPA for the latest stable:
+0.21. Use the official PPA for the latest stable (verified on
+Ubuntu 24.04, x86_64):
 
 ```bash
 sudo add-apt-repository ppa:freecad-maintainers/freecad-stable
@@ -34,11 +35,13 @@ and `PYTHONPATH`), so you can point at every directory FreeCAD needs
 in one variable:
 
 ```bash
-# Linux (apt / PPA install)
-export FREECAD_LIB=/usr/lib/freecad/lib:/usr/lib/freecad/lib/Mod:/usr/share/freecad/Mod
+# macOS (Homebrew cask) — single path; the .app bundle finds its own
+# workbenches relative to the binary.
+export FREECAD_LIB=/Applications/FreeCAD.app/Contents/Resources/lib
 
-# macOS (Homebrew cask)
-export FREECAD_LIB=/Applications/FreeCAD.app/Contents/Resources/lib:/Applications/FreeCAD.app/Contents/Resources/Mod
+# Linux (apt / PPA install) — three paths: the binding, the bundled
+# workbenches under lib/Mod, and the shared workbench tree.
+export FREECAD_LIB=/usr/lib/freecad/lib:/usr/lib/freecad/lib/Mod:/usr/share/freecad/Mod
 ```
 
 Verify the wiring:

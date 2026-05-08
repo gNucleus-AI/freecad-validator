@@ -28,18 +28,11 @@ from pathlib import Path
 
 def _candidate_paths() -> Iterable[Path]:
     """Yield directories that *might* contain FreeCAD's Python binding,
-    in priority order. The env-var override comes first; conda
-    second; then platform-default install locations."""
-    # Explicit user override wins. ``FREECAD_LIB`` may be a single
-    # directory or an ``os.pathsep``-separated list (``:`` on Unix,
-    # ``;`` on Windows) — same convention as ``PATH`` / ``PYTHONPATH``.
-    env = os.environ.get("FREECAD_LIB")
-    if env:
-        for part in env.split(os.pathsep):
-            part = part.strip()
-            if part:
-                yield Path(part)
-
+    in priority order: conda first, then platform-default install
+    locations. The ``FREECAD_LIB`` env override is handled separately
+    in :func:`import_freecad` so that all of its entries are added to
+    ``sys.path`` even when they are workbench/Mod directories rather
+    than the binding lib itself."""
     # conda-forge::freecad puts the binding directly under $CONDA_PREFIX/lib.
     conda_prefix = os.environ.get("CONDA_PREFIX")
     if conda_prefix:
@@ -61,6 +54,24 @@ def _candidate_paths() -> Iterable[Path]:
         "/usr/local/lib/freecad/lib",
     ):
         yield Path(p)
+
+
+def _linux_mod_dirs(lib_dir: Path) -> Iterable[Path]:
+    """Yield workbench/Mod directories that pair with a Linux ``lib``
+    candidate. FreeCAD on apt/PPA installs splits the binding (under
+    ``/usr/lib/freecad*/lib``) from its Python workbenches (under
+    ``/usr/lib/freecad*/lib/Mod`` and ``/usr/share/freecad*/Mod``);
+    the workbenches need to be on ``sys.path`` for ``FreeCAD.open()``
+    to deserialize ``Part``/``Sketcher``/``PartDesign`` objects.
+
+    Both ``freecad`` and ``freecad-python3`` packages typically share
+    ``/usr/share/freecad/Mod``, so we yield every plausible Mod root
+    and let the caller filter by :meth:`Path.is_dir`."""
+    # Sibling Mod next to the binding (e.g. /usr/lib/freecad/lib/Mod).
+    yield lib_dir / "Mod"
+    # Distro-shared workbench trees.
+    yield Path("/usr/share/freecad/Mod")
+    yield Path("/usr/share/freecad-python3/Mod")
 
 
 def _looks_like_freecad_lib(d: Path) -> bool:
@@ -112,12 +123,41 @@ def import_freecad():
         pass
 
     tried: list[Path] = []
+
+    # Explicit user override. ``FREECAD_LIB`` may be a single directory
+    # or an ``os.pathsep``-separated list (``:`` on Unix, ``;`` on
+    # Windows) — same convention as ``PATH`` / ``PYTHONPATH``. We add
+    # *every* listed directory to ``sys.path`` (even ones that don't
+    # contain ``FreeCAD.so``) because Linux distro installs require
+    # the lib *and* Mod dirs to be importable, e.g.
+    # ``FREECAD_LIB=/usr/lib/freecad/lib:/usr/lib/freecad/lib/Mod:/usr/share/freecad/Mod``.
+    env = os.environ.get("FREECAD_LIB")
+    if env:
+        for part in env.split(os.pathsep):
+            part = part.strip()
+            if not part:
+                continue
+            p = Path(part)
+            tried.append(p)
+            if p.is_dir() and str(p) not in sys.path:
+                sys.path.insert(0, str(p))
+        try:
+            import FreeCAD  # type: ignore
+            return FreeCAD
+        except ImportError:
+            # User-supplied paths didn't resolve; fall through to the
+            # built-in candidates.
+            pass
+
     for path in _candidate_paths():
         tried.append(path)
         if not _looks_like_freecad_lib(path):
             continue
-        if str(path) not in sys.path:
-            sys.path.insert(0, str(path))
+        # Add the lib dir + any sibling Mod dirs so FreeCAD's own
+        # workbench imports succeed when it deserializes a document.
+        for d in (path, *_linux_mod_dirs(path)):
+            if d.is_dir() and str(d) not in sys.path:
+                sys.path.insert(0, str(d))
         try:
             import FreeCAD  # type: ignore
             return FreeCAD
