@@ -8,11 +8,13 @@ import numpy as np
 import pyvista as pv
 
 # `FreeCAD` must precede `Mesh` — Mesh's C extension binds against FreeCAD
-# symbols and segfaults on macOS otherwise.
-# isort: off
-import FreeCAD
-import Mesh
-# isort: on
+# symbols and segfaults on macOS otherwise. Route through the project
+# loader so FreeCAD is discovered at common install paths without the
+# caller having to set PYTHONPATH / FREECAD_LIB.
+from freecad_validator._freecad_loader import import_freecad
+
+FreeCAD = import_freecad()
+import Mesh  # noqa: E402  — must come after FreeCAD import
 
 
 # ----------------------------- FreeCAD → Mesh -----------------------------
