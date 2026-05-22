@@ -1,14 +1,18 @@
 """``freecad-validator`` CLI.
 
-Three subcommands::
+Four subcommands::
 
     freecad-validator validate CANDIDATE.FCStd REFERENCE.FCStd SPEC.json
     freecad-validator batch    --sample-data-dir <path>
     freecad-validator join     --candidate-dir <path> --reference-dir <path> --output-dir <path>
+    freecad-validator render   INPUT.FCStd OUTPUT.png
 
 The CLI is a thin wrapper over the public Python API
 (``freecad_validator.Validator``); every subcommand can be reproduced
 in a few lines of Python.
+
+``render`` requires the optional ``render`` extra (``pip install
+gnucleus-freecad-validator[render]``) which pulls in PyVista / VTK.
 """
 from __future__ import annotations
 
@@ -331,6 +335,30 @@ def _run_join(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# `render` — rasterize one FCStd to a PNG (requires the `render` extra)
+# ---------------------------------------------------------------------------
+
+
+def _add_render_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("input_fcstd", help="path to the input .FCStd")
+    p.add_argument("output_png", help="path to write the PNG (parent dirs are created)")
+    p.add_argument("--finer-mesh", action="store_true",
+                   help="scale tessellation tolerances to the part's bbox diagonal "
+                        "for higher-fidelity output (can 10×+ vertex/face counts; "
+                        "default tessellates at fixed mesh=0.1mm / edge=0.05mm)")
+
+
+def _run_render(args: argparse.Namespace) -> int:
+    # Local import so users without the `render` extra don't pay the
+    # PyVista/VTK import cost for `validate` / `batch` / `join`.
+    from freecad_validator.render.render_freecad import render_freecad_file
+    ok = render_freecad_file(
+        args.input_fcstd, args.output_png, finer_mesh=args.finer_mesh,
+    )
+    return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
@@ -342,6 +370,8 @@ _SUBCOMMANDS = (
      _add_batch_args, _run_batch),
     ("join", "build a sample-data directory from separate trees",
      _add_join_args, _run_join),
+    ("render", "rasterize a .FCStd to a PNG (requires `[render]` extra)",
+     _add_render_args, _run_render),
 )
 
 
