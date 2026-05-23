@@ -15,6 +15,9 @@ Public API::
 """
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from freecad_validator.comparators.geometry import GeometryTolerances
 from freecad_validator.consistency.checker import SpecTolerances
 from freecad_validator.validator import CombineMethod, ValidationResult
@@ -27,4 +30,10 @@ __all__ = [
     "Validator",
     "ValidationResult",
 ]
-__version__ = "0.1.0"
+
+try:
+    # Track the version declared in pyproject.toml so we don't drift.
+    __version__ = _pkg_version("gnucleus-freecad-validator")
+except PackageNotFoundError:
+    # Running from a source checkout without an installed dist.
+    __version__ = "0.0.0+unknown"
