@@ -17,9 +17,8 @@ from __future__ import annotations
 
 from freecad_validator.comparators.geometry import GeometryTolerances
 from freecad_validator.consistency.checker import SpecTolerances
-from freecad_validator.validator import CombineMethod
+from freecad_validator.validator import CombineMethod, ValidationResult
 from freecad_validator.validator import HeuristicValidator as Validator
-from freecad_validator.validator import ValidationResult
 
 __all__ = [
     "CombineMethod",
