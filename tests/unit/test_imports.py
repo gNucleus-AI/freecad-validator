@@ -58,14 +58,22 @@ def test_categories_are_registered_class_per_file():
         assert cat_subclasses, f"{mod.__name__} has no Category subclass"
 
 
-def test_render_module_imports():
+def test_render_module_imports(freecad_available):
     """`freecad_validator.render.render_freecad` imports cleanly when the
     `[render]` extra is installed. The module pulls in PyVista, NumPy,
     FreeCAD, and Mesh at module load, so this test is skipped in envs
     that lack any of those.
+
+    Uses the ``freecad_available`` fixture (conftest.py) instead of
+    ``pytest.importorskip("FreeCAD")`` because conftest installs a
+    no-op ``FreeCAD`` stub for the other import-smoke tests, which
+    would let ``importorskip`` succeed without real FreeCAD on PATH —
+    and then ``import Mesh`` (a sibling C extension, not a submodule)
+    fails because the lib dir was never added to sys.path.
     """
+    if not freecad_available:
+        pytest.skip("real FreeCAD module is not importable on this host")
     pytest.importorskip("pyvista")
-    pytest.importorskip("FreeCAD")  # Mesh imports follow once FreeCAD is up
     import freecad_validator.render.render_freecad as r  # noqa: F401
 
     # Public surface the CLI relies on.
