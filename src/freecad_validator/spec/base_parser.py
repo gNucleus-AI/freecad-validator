@@ -21,6 +21,11 @@ class StructuredSpec(BaseModel):
     scalars: dict[str, float] = Field(default_factory=dict)
     vectors: dict[str, tuple[float, ...]] = Field(default_factory=dict)
     counts: dict[str, int] = Field(default_factory=dict)
+    # Single-token string-valued spec keys whose RHS doesn't parse as a
+    # number — e.g. ``helix_hand = right``, ``helix_hand = left``,
+    # ``thread_class = 6H``. Only simple bare identifiers go here; any
+    # value with whitespace / math / units flows to scalars or counts.
+    strings: dict[str, str] = Field(default_factory=dict)
     # Populated by the optional LLM fallback. The regex-only
     # path leaves this empty; the classifier must tolerate that.
     expected_features: list[str] = Field(default_factory=list)
