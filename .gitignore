@@ -27,3 +27,12 @@ htmlcov/
 # Sphinx / mkdocs
 site/
 _build/
+
+# FreeCAD documents and their backups. Tests generate fixtures into
+# pytest's tmp_path, so a .FCStd inside the repo is an accident. If a
+# case ever needs a committed fixture, negate this for that path, e.g.
+#   !tests/fixtures/*.FCStd
+*.FCStd
+*.FCStd[0-9]
+*.FCStd.bak
+*.FCBak

@@ -1,8 +1,13 @@
 """Pytest configuration.
 
 The ``needs_freecad`` marker tags tests that depend on a real FreeCAD
-installation. CI runners typically don't have FreeCAD, so those
-tests are skipped unless ``-m needs_freecad`` is explicitly passed.
+installation — the end-to-end suite under ``tests/e2e/``. CI runs
+``pytest -m "not needs_freecad"`` and never loads FreeCAD; run them
+locally against a real install with
+
+    pytest -m needs_freecad
+
+On a host without FreeCAD they skip rather than fail.
 
 Additionally: a lightweight stub for the ``FreeCAD`` module is
 installed into ``sys.modules`` *before* test collection when the real
@@ -19,12 +24,22 @@ import pytest
 
 
 def _real_freecad_importable() -> bool:
-    """True iff a real FreeCAD module loads (not our stub)."""
+    """True iff a real FreeCAD module loads (not our stub).
+
+    Resolves through the package's own loader rather than a bare
+    ``import FreeCAD``. A bare import ignores ``FREECAD_LIB`` and the
+    platform install paths, so on macOS (.dmg) and apt installs it
+    reports "no FreeCAD" even when FreeCAD is installed and the
+    library itself loads it fine — which would silently skip every
+    ``needs_freecad`` test and run the rest against the stub below.
+    """
     try:
-        import FreeCAD  # type: ignore
+        from freecad_validator._freecad_loader import import_freecad
+
+        freecad = import_freecad()
     except Exception:
         return False
-    return getattr(FreeCAD, "__file__", None) is not None
+    return getattr(freecad, "__file__", None) is not None
 
 
 # Install a no-op stub at collection time so module-level
