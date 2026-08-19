@@ -1,7 +1,7 @@
 """Spline (involute) category helpers.
 
 Splines overlap with gears in ISO relationships but the spec's key
-naming is far less uniform. Across the abundant dataset's
+naming is far less uniform. Across the reference corpus's
 ``shaft_with_spline`` cases we see variants like:
 
     section_2_spline_module        section_2_number_teeth

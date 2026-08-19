@@ -1,8 +1,8 @@
 """Hex (regular hexagonal profile) category helpers.
 
 Handles hex-nut / hex-head / hex-coupling specs whose key dimensions
-are standard hex-profile measurements. Observed in the abundant dataset
-across ``coupling_nuts`` and ``flange_nuts``:
+are standard hex-profile measurements. Observed in the reference
+corpus across ``coupling_nuts`` and ``flange_nuts``:
 
     hex_width_across_flats      hex_head_width_across_flats
     hex_nut_width_across_flats  across_flats_width
