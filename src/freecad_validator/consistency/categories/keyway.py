@@ -1,7 +1,7 @@
 """Keyway / key category helpers.
 
 Handles shaft keyways and their mating key pieces. Spec keys observed
-in the abundant dataset's ``shaft_with_keyway`` cases:
+in the reference corpus's ``shaft_with_keyway`` cases:
 
     keyway_width    keyway_depth    keyway_height    keyway_length
     num_keyway

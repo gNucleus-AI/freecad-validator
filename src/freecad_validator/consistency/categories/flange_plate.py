@@ -1,7 +1,7 @@
 """Flange-plate category helpers.
 
 Handles square / rectangular flange-mount specs whose key dimensions
-are plate-and-lug geometry. Observed in the abundant dataset across
+are plate-and-lug geometry. Observed in the reference corpus across
 ``square_flange_mount/``:
 
     base_plate_width        plate_width        plate_height
