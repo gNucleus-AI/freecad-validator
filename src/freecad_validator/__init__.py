@@ -1,7 +1,6 @@
-"""``gnucleus-freecad-validator`` — heuristic geometry-similarity +
-spec-consistency scoring for FreeCAD parts.
+"""Deterministic validation for FreeCAD CAD and FEM artifacts.
 
-Public API::
+The original geometry/spec API remains available at package level::
 
     from freecad_validator import Validator, ValidationResult
 
@@ -12,6 +11,9 @@ Public API::
         spec_json="path/to/spec.json",
     )
     print(result.combined, result.geometry_similarity, result.cad_spec_consistency)
+
+Placement protocols live under :mod:`freecad_validator.placement`, and solved
+FreeCAD/CalculiX FEM validation lives under :mod:`freecad_validator.fem`.
 """
 from __future__ import annotations
 

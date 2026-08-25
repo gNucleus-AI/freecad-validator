@@ -1,7 +1,8 @@
 # gnucleus-freecad-validator
 
-Heuristic geometry-similarity + spec-consistency scoring for FreeCAD parts.
-Deterministic, reproducible, no LLM, no GPU.
+Deterministic validation for FreeCAD CAD geometry, design specifications,
+placement, and solved FreeCAD/CalculiX FEM analyses. Reproducible, no LLM, no
+GPU.
 
 ## Prerequisites
 
@@ -164,6 +165,58 @@ models, aligned-pair protocol, and exception hierarchy are stable contribution
 boundaries. Algorithm implementations are not included yet, so the four
 operations currently raise `NotImplementedError`.
 
+### FEM validation
+
+The FEM API compares a candidate solved FCStd with an engineer-generated solved
+reference on a source STEP. It extracts the saved analysis, replays the
+candidate solve with CalculiX, verifies the stored displacement and stress
+fields, and returns a deterministic 0–100 report with validity gates and
+engineering diagnostics.
+
+```python
+from freecad_validator.fem import FEMValidator
+
+validator = FEMValidator(require_boolean=True)
+report = validator.validate(
+    step_path="source.step",
+    reference_fcstd="reference.FCStd",
+    candidate_fcstd="candidate.FCStd",
+)
+print(report.overall_score, report.grade, report.gates_triggered)
+```
+
+Trusted, already-extracted dictionaries can be scored without FreeCAD or CalculiX:
+
+```python
+from freecad_validator.fem import score_trusted_payloads
+
+report = score_trusted_payloads(target_geometry, reference_payload, candidate_payload)
+```
+
+This low-level function trusts adapter-produced replay-verification fields. Do
+not pass candidate-controlled JSON to it. Use `FEMValidator.validate()` for
+untrusted FCStd inputs so the validator performs extraction and solver replay.
+
+The equivalent CLI is:
+
+```bash
+freecad-validator fem-score source.step reference.FCStd candidate.FCStd \
+  --timeout 900 --json
+```
+
+Use `--require-boolean` only for tasks whose metadata explicitly requires a
+Boolean operation, and `--require-preprocessing` only when preprocessing is an
+explicit task requirement. Neither requirement is inferred from instruction
+text. Intermediate extraction JSON is temporary by default; pass
+`--extract-dir` to retain it.
+
+> [!WARNING]
+> FEM validation executes FreeCAD and CalculiX subprocesses against the
+> candidate document. Although the FCStd adapter rejects archive path
+> traversal before opening the file, untrusted submissions should still be
+> validated in a locked-down container with no network access and no sensitive
+> host mounts.
+
 ## Scoring
 
 Two independent passes per case:
@@ -298,3 +351,17 @@ Apache 2.0 — see [`LICENSE`](LICENSE).
 
 This project depends on [FreeCAD](https://www.freecad.org/), which is
 licensed under LGPL 2.1+. FreeCAD is not bundled with this package.
+
+Full FCStd FEM validation requires [CalculiX](https://www.calculix.de/), which is
+licensed under GPL 2.0 or later and is not bundled with this package. Install a
+`ccx` executable for the validator runtime, or configure `ccxBinaryPath` in
+FreeCAD's FEM preferences. The runtime preflight verifies FreeCAD, OCCT, the
+embedded Python, and CalculiX before candidate scoring; these versions are
+recorded in `ScoringReport.runtime_provenance`.
+
+- macOS: the official FreeCAD application includes `ccx` beside `freecadcmd`,
+  which the validator detects automatically.
+- Linux: install CalculiX with the system package manager and ensure `ccx` is
+  executable on `PATH`.
+- Windows: install a CalculiX executable and select it as `ccxBinaryPath` in
+  FreeCAD's FEM preferences.
