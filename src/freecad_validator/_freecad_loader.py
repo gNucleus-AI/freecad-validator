@@ -20,10 +20,69 @@ location — that path is tried before any built-in candidate.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import textwrap
 from collections.abc import Iterable
 from pathlib import Path
+
+
+def _resolve_executable(candidate: str | os.PathLike[str]) -> str | None:
+    """Return an absolute executable path for a path or command name."""
+    value = os.fspath(candidate)
+    resolved = shutil.which(value)
+    if resolved:
+        return str(Path(resolved).resolve())
+    path = Path(value).expanduser()
+    if path.is_file() and os.access(path, os.X_OK):
+        return str(path.resolve())
+    return None
+
+
+def resolve_freecad_command(
+    explicit: str | os.PathLike[str] | None = None,
+) -> str:
+    """Locate the FreeCAD 1.1 command-line executable.
+
+    ``explicit`` wins, followed by ``FREECAD_CMD``, the active conda
+    environment, ``PATH``, and common macOS/Windows application locations.
+    The returned value is always an absolute executable path.
+    """
+    requested = explicit or os.environ.get("FREECAD_CMD")
+    if requested:
+        resolved = _resolve_executable(requested)
+        if resolved:
+            return resolved
+        raise FileNotFoundError(
+            f"FreeCAD command {os.fspath(requested)!r} was not found or is not executable"
+        )
+
+    candidates: list[str | os.PathLike[str]] = []
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix:
+        candidates.extend(
+            Path(conda_prefix) / "bin" / name
+            for name in ("freecadcmd", "FreeCADCmd")
+        )
+    candidates.extend(("freecadcmd", "FreeCADCmd"))
+    candidates.extend(
+        (
+            "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd",
+            "/Applications/FreeCAD.app/Contents/MacOS/FreeCADCmd",
+        )
+    )
+    program_files = os.environ.get("ProgramFiles")
+    if program_files:
+        candidates.append(Path(program_files) / "FreeCAD 1.1" / "bin" / "FreeCADCmd.exe")
+
+    for candidate in candidates:
+        resolved = _resolve_executable(candidate)
+        if resolved:
+            return resolved
+    raise FileNotFoundError(
+        "FreeCAD's command-line executable could not be located. Install FreeCAD 1.1 "
+        "or set FREECAD_CMD to freecadcmd/FreeCADCmd."
+    )
 
 
 def _candidate_paths() -> Iterable[Path]:

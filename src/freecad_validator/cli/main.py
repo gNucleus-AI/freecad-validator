@@ -1,11 +1,12 @@
 """``freecad-validator`` CLI.
 
-Four subcommands::
+Five subcommands::
 
     freecad-validator validate CANDIDATE.FCStd REFERENCE.FCStd SPEC.json
     freecad-validator batch    --sample-data-dir <path>
     freecad-validator join     --candidate-dir <path> --reference-dir <path> --output-dir <path>
     freecad-validator render   INPUT.FCStd OUTPUT.png
+    freecad-validator fem-score SOURCE.step REFERENCE.FCStd CANDIDATE.FCStd
 
 The CLI is a thin wrapper over the public Python API
 (``freecad_validator.Validator``); every subcommand can be reproduced
@@ -26,6 +27,14 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from freecad_validator import Validator
+from freecad_validator.fem import FEMValidator
+from freecad_validator.fem.schema import (
+    DISP_TOL,
+    GROSS_TOL,
+    MESH_BUDGET_ZERO_RATIO,
+    STRESS_TOL,
+)
+from freecad_validator.fem.step_interface import DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
 from freecad_validator.scorers.geometry import (
     add_tolerance_arguments,
     tolerances_from_args,
@@ -374,6 +383,69 @@ def _run_render(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# `fem-score` — replay and score one solved FreeCAD/CalculiX analysis
+# ---------------------------------------------------------------------------
+
+
+def _add_fem_score_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("step_path", help="source STEP geometry used by the FEM analysis")
+    p.add_argument("reference_fcstd", help="engineer-generated solved reference FCStd")
+    p.add_argument("candidate_fcstd", help="candidate solved FCStd to validate")
+    p.add_argument("--freecad-cmd", help="path or command name for FreeCAD 1.1.0 freecadcmd")
+    p.add_argument("--extract-dir", help="retain intermediate extraction JSON in this directory")
+    p.add_argument("--disp-tol", type=float, default=DISP_TOL,
+                   help="relative displacement/frequency tolerance")
+    p.add_argument("--stress-tol", type=float, default=STRESS_TOL,
+                   help="relative stress tolerance")
+    p.add_argument("--gross-tol", type=float, default=GROSS_TOL,
+                   help="critical-result relative-error validity gate")
+    p.add_argument("--mesh-budget-ratio", type=float, default=MESH_BUDGET_ZERO_RATIO,
+                   help="element-count ratio at which mesh-budget credit reaches zero")
+    p.add_argument("--require-preprocessing", action="store_true",
+                   help="require candidate geometry to differ from the raw STEP")
+    p.add_argument("--require-boolean", action="store_true",
+                   help="require the explicit minimum Boolean topology contract")
+    p.add_argument("--timeout", type=float, default=DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+                   help="maximum seconds for each FreeCAD/CalculiX adapter process")
+    p.add_argument("--json", dest="emit_json", action="store_true",
+                   help="emit the full scoring report as JSON")
+    p.add_argument("--output-json", type=Path,
+                   help="also write the full scoring report to this path")
+
+
+def _run_fem_score(args: argparse.Namespace) -> int:
+    validator = FEMValidator(
+        freecad_cmd=args.freecad_cmd,
+        extract_dir=args.extract_dir,
+        displacement_tolerance=args.disp_tol,
+        stress_tolerance=args.stress_tol,
+        gross_error_tolerance=args.gross_tol,
+        mesh_budget_zero_ratio=args.mesh_budget_ratio,
+        require_preprocessing=args.require_preprocessing,
+        require_boolean=args.require_boolean,
+        timeout_seconds=args.timeout,
+    )
+    report = validator.validate(
+        step_path=args.step_path,
+        reference_fcstd=args.reference_fcstd,
+        candidate_fcstd=args.candidate_fcstd,
+    )
+    payload = report.to_dict()
+    if args.output_json is not None:
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        args.output_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if args.emit_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(report.summary_line())
+        print(f"confidence={report.confidence} reproducibility={report.reproducibility_status}")
+        if report.gates_triggered:
+            reasons = sorted({gate["reason"] for gate in report.gates_triggered})
+            print("validity_gates=" + ",".join(reasons))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
@@ -387,6 +459,8 @@ _SUBCOMMANDS = (
      _add_join_args, _run_join),
     ("render", "rasterize a .FCStd to a PNG (requires `[render]` extra)",
      _add_render_args, _run_render),
+    ("fem-score", "replay and score a solved FreeCAD/CalculiX analysis",
+     _add_fem_score_args, _run_fem_score),
 )
 
 

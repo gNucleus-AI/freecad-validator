@@ -9,10 +9,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from freecad_validator._freecad_loader import (
     _candidate_paths,
     _linux_mod_dirs,
     _looks_like_freecad_lib,
+    resolve_freecad_command,
 )
 
 
@@ -82,3 +85,27 @@ def test_mod_dirs_pair_with_a_linux_lib_dir():
 def test_pathsep_is_the_documented_list_separator():
     """FREECAD_LIB is split on os.pathsep, matching PATH/PYTHONPATH."""
     assert os.pathsep in (":", ";")
+
+
+def test_explicit_freecad_command_is_resolved(tmp_path):
+    command = tmp_path / "freecadcmd"
+    command.write_text("#!/bin/sh\n", encoding="utf-8")
+    command.chmod(0o755)
+
+    assert resolve_freecad_command(command) == str(command.resolve())
+
+
+def test_freecad_command_environment_override(monkeypatch, tmp_path):
+    command = tmp_path / "FreeCADCmd"
+    command.write_text("#!/bin/sh\n", encoding="utf-8")
+    command.chmod(0o755)
+    monkeypatch.setenv("FREECAD_CMD", str(command))
+
+    assert resolve_freecad_command() == str(command.resolve())
+
+
+def test_missing_explicit_freecad_command_fails_clearly(tmp_path):
+    missing = tmp_path / "missing-freecadcmd"
+
+    with pytest.raises(FileNotFoundError, match="not found or is not executable"):
+        resolve_freecad_command(missing)

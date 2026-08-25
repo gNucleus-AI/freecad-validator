@@ -25,6 +25,9 @@ def test_subpackages_import():
     import freecad_validator.consistency.checks  # noqa: F401
     import freecad_validator.consistency.compare  # noqa: F401
     import freecad_validator.consistency.report  # noqa: F401
+    import freecad_validator.fem  # noqa: F401
+    import freecad_validator.fem.metrics  # noqa: F401
+    import freecad_validator.fem.replay_compare  # noqa: F401
     import freecad_validator.scorers.base  # noqa: F401
     import freecad_validator.spec.parser  # noqa: F401
 
