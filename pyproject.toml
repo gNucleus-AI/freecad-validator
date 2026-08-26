@@ -35,10 +35,6 @@ dev = [
     "ruff",
     "mypy",
 ]
-docs = [
-    "mkdocs-material",
-    "mkdocstrings[python]",
-]
 # `render` enables the `freecad-validator render` subcommand
 # (rasterize a .FCStd to a PNG). PyVista pulls VTK as a transitive,
 # so keep it opt-in — most validator users don't need rendering.
