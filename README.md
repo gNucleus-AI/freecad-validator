@@ -1,8 +1,7 @@
 # gnucleus-freecad-validator
 
-Deterministic validation for FreeCAD CAD geometry, design specifications,
-placement, and solved FreeCAD/CalculiX FEM analyses. Reproducible, no LLM, no
-GPU.
+Deterministic validation for FreeCAD CAD geometry, design specifications, and
+solved FreeCAD/CalculiX FEM analyses. Reproducible, no LLM, no GPU.
 
 ## Prerequisites
 
@@ -141,29 +140,6 @@ result.cad_spec_consistency   # spec ↔ CAD sub-score
 
 For repeated scoring, reuse one `Validator` across cases — its
 internal scorers amortize across calls.
-
-### Placement validation API contract
-
-The implementation-neutral placement API is available as a contract preview:
-
-```python
-from freecad_validator.placement import (
-    align_fcstd,
-    calculate_placement,
-    calculate_surface_coverage,
-    calculate_volumetric_iou,
-)
-
-aligned = align_fcstd("reference.FCStd", "candidate.FCStd")
-placement = calculate_placement(aligned)
-volume = calculate_volumetric_iou(aligned)
-surface = calculate_surface_coverage(aligned)
-```
-
-The public function signatures, immutable Pydantic configuration and result
-models, aligned-pair protocol, and exception hierarchy are stable contribution
-boundaries. Algorithm implementations are not included yet, so the four
-operations currently raise `NotImplementedError`.
 
 ### FEM validation
 
