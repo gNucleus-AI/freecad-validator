@@ -73,7 +73,13 @@ def evaluate_reporting(case: CaseDefinition, sub: Submission) -> tuple[float, li
 
     if missing:
         sev = "major" if score < 50 else "minor"
-        findings.append(Finding("engineering_reporting", "INCOMPLETE_REPORT", sev,
-                                "Reporting gaps: " + ", ".join(missing) + ".",
-                                penalty=0))
+        findings.append(
+            Finding(
+                "engineering_reporting",
+                "INCOMPLETE_REPORT",
+                sev,
+                "Reporting gaps: " + ", ".join(missing) + ".",
+                penalty=0,
+            )
+        )
     return score, findings

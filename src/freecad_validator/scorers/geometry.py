@@ -23,6 +23,7 @@ anything from here. The comparator's job is to produce per-aspect
 subscores; this module's job is to combine them into the heuristic
 similarity score.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,9 +41,9 @@ from freecad_validator.scorers.base import FCStdBaseScorer
 
 COMPARATOR_WEIGHTS = {
     "surface_types": 0.10,
-    "volume":        0.35,
-    "surface_area":  0.40,
-    "bbox":          0.15,
+    "volume": 0.35,
+    "surface_area": 0.40,
+    "bbox": 0.15,
 }
 
 
@@ -104,9 +105,12 @@ class HeuristicGeometryScorer(FCStdBaseScorer):
         subscores = dict(geom_result.details["subscores"])
         overall = combine_subscores(subscores)
         reason = _format_reason(
-            reference, candidate, overall,
+            reference,
+            candidate,
+            overall,
             int(geom_result.details.get("solid_count", 0)),
-            subscores, geom_result.details,
+            subscores,
+            geom_result.details,
         )
         return ComparisonResult(
             score=overall,
@@ -133,10 +137,7 @@ def add_tolerance_arguments(parser: argparse.ArgumentParser) -> None:
             cli_flag,
             type=float,
             default=None,
-            help=(
-                f"override {field_name} "
-                f"(default: {getattr(defaults, field_name)})"
-            ),
+            help=(f"override {field_name} (default: {getattr(defaults, field_name)})"),
         )
 
 

@@ -15,6 +15,7 @@ in a few lines of Python.
 ``render`` requires the optional ``render`` extra (``pip install
 gnucleus-freecad-validator[render]``) which pulls in PyVista / VTK.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,11 +50,14 @@ from freecad_validator.validator import COMBINE_METHODS, DEFAULT_COMBINE_METHOD
 def _add_combine_method_argument(p: argparse.ArgumentParser) -> None:
     """Shared `--combine-method` flag for `validate` and `batch`."""
     p.add_argument(
-        "--combine-method", choices=COMBINE_METHODS, default=DEFAULT_COMBINE_METHOD,
+        "--combine-method",
+        choices=COMBINE_METHODS,
+        default=DEFAULT_COMBINE_METHOD,
         help="how to aggregate geometry_similarity and cad_spec_consistency into "
-             f"`combined` (default: {DEFAULT_COMBINE_METHOD}). 'harmonic' = "
-             "2gs/(g+s); 'min' = min(g, s) — strictest, pins to the weakest axis.",
+        f"`combined` (default: {DEFAULT_COMBINE_METHOD}). 'harmonic' = "
+        "2gs/(g+s); 'min' = min(g, s) — strictest, pins to the weakest axis.",
     )
+
 
 # ---------------------------------------------------------------------------
 # `validate` — score one (candidate, reference, spec) triple
@@ -67,8 +71,9 @@ def _add_validate_args(p: argparse.ArgumentParser) -> None:
     add_tolerance_arguments(p)
     add_spec_tolerance_arguments(p)
     _add_combine_method_argument(p)
-    p.add_argument("--json", dest="emit_json", action="store_true",
-                   help="emit the result as JSON on stdout")
+    p.add_argument(
+        "--json", dest="emit_json", action="store_true", help="emit the result as JSON on stdout"
+    )
 
 
 def _run_validate(args: argparse.Namespace) -> int:
@@ -99,14 +104,24 @@ def _run_validate(args: argparse.Namespace) -> int:
 
 
 def _add_batch_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--sample-data-dir", type=Path, required=True,
-                   help="root containing data/<case>/{candidate,reference}.FCStd + spec.json")
-    p.add_argument("--output-csv", type=Path, default=None,
-                   help="per-case results CSV "
-                        "(default: <sample-data-dir>/validation_results.csv)")
-    p.add_argument("--output-summary", type=Path, default=None,
-                   help="aggregate summary JSON "
-                        "(default: <sample-data-dir>/validation_summary.json)")
+    p.add_argument(
+        "--sample-data-dir",
+        type=Path,
+        required=True,
+        help="root containing data/<case>/{candidate,reference}.FCStd + spec.json",
+    )
+    p.add_argument(
+        "--output-csv",
+        type=Path,
+        default=None,
+        help="per-case results CSV (default: <sample-data-dir>/validation_results.csv)",
+    )
+    p.add_argument(
+        "--output-summary",
+        type=Path,
+        default=None,
+        help="aggregate summary JSON (default: <sample-data-dir>/validation_summary.json)",
+    )
     add_tolerance_arguments(p)
     add_spec_tolerance_arguments(p)
     _add_combine_method_argument(p)
@@ -143,7 +158,8 @@ def _find_spec_json(case_dir: Path) -> Path | None:
     if legacy.is_file():
         return legacy
     candidates = [
-        p for p in case_dir.glob("*.json")
+        p
+        for p in case_dir.glob("*.json")
         if p.name not in ("validation_results.json", "validation_summary.json")
     ]
     if len(candidates) == 1:
@@ -161,8 +177,10 @@ def _validate_one(case_dir: Path, validator: Validator) -> tuple[str, dict]:
     if not reference.is_file():
         return cid, {"error": f"missing reference: {reference}"}
     if spec_json is None:
-        return cid, {"error": f"missing spec JSON in {case_dir} "
-                              f"(looked for spec.json, {cid}.json, or a single *.json)"}
+        return cid, {
+            "error": f"missing spec JSON in {case_dir} "
+            f"(looked for spec.json, {cid}.json, or a single *.json)"
+        }
     try:
         result = validator.validate(
             candidate_fcstd=str(candidate),
@@ -210,13 +228,17 @@ def _run_batch(args: argparse.Namespace) -> int:
         if "error" in result:
             n_err += 1
             print(f"[{i:3d}/{len(cases)}] {cid}  ERROR  {result['error']}")
-            rows.append({
-                "case_id": cid, "geometry_similarity": "",
-                "cad_spec_consistency": "", "combined": "",
-                "geometry_similarity_reason": "",
-                "cad_spec_consistency_reason": "",
-                "error": result["error"],
-            })
+            rows.append(
+                {
+                    "case_id": cid,
+                    "geometry_similarity": "",
+                    "cad_spec_consistency": "",
+                    "combined": "",
+                    "geometry_similarity_reason": "",
+                    "cad_spec_consistency_reason": "",
+                    "error": result["error"],
+                }
+            )
             continue
         geom_scores.append(result["geometry_similarity"])
         spec_scores.append(result["cad_spec_consistency"])
@@ -227,19 +249,26 @@ def _run_batch(args: argparse.Namespace) -> int:
             f"spec={result['cad_spec_consistency']:.3f}  "
             f"combined={result['combined']:.3f}"
         )
-        rows.append({
-            "case_id": cid,
-            "geometry_similarity": f"{result['geometry_similarity']:.4f}",
-            "cad_spec_consistency": f"{result['cad_spec_consistency']:.4f}",
-            "combined": f"{result['combined']:.4f}",
-            "geometry_similarity_reason": result["geometry_similarity_reason"],
-            "cad_spec_consistency_reason": result["cad_spec_consistency_reason"],
-            "error": "",
-        })
+        rows.append(
+            {
+                "case_id": cid,
+                "geometry_similarity": f"{result['geometry_similarity']:.4f}",
+                "cad_spec_consistency": f"{result['cad_spec_consistency']:.4f}",
+                "combined": f"{result['combined']:.4f}",
+                "geometry_similarity_reason": result["geometry_similarity_reason"],
+                "cad_spec_consistency_reason": result["cad_spec_consistency_reason"],
+                "error": "",
+            }
+        )
 
     fields = [
-        "case_id", "geometry_similarity", "cad_spec_consistency", "combined",
-        "geometry_similarity_reason", "cad_spec_consistency_reason", "error",
+        "case_id",
+        "geometry_similarity",
+        "cad_spec_consistency",
+        "combined",
+        "geometry_similarity_reason",
+        "cad_spec_consistency_reason",
+        "error",
     ]
     with out_csv.open("w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
@@ -275,8 +304,9 @@ def _add_join_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--candidate-dir", type=Path, required=True)
     p.add_argument("--reference-dir", type=Path, required=True)
     p.add_argument("--output-dir", type=Path, required=True)
-    p.add_argument("--force", action="store_true",
-                   help="rmtree --output-dir first instead of merging into it")
+    p.add_argument(
+        "--force", action="store_true", help="rmtree --output-dir first instead of merging into it"
+    )
 
 
 def _candidate_fcstd(case_dir: Path) -> Path | None:
@@ -366,18 +396,24 @@ def _run_join(args: argparse.Namespace) -> int:
 def _add_render_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("input_fcstd", help="path to the input .FCStd")
     p.add_argument("output_png", help="path to write the PNG (parent dirs are created)")
-    p.add_argument("--finer-mesh", action="store_true",
-                   help="scale tessellation tolerances to the part's bbox diagonal "
-                        "for higher-fidelity output (can 10×+ vertex/face counts; "
-                        "default tessellates at fixed mesh=0.1mm / edge=0.05mm)")
+    p.add_argument(
+        "--finer-mesh",
+        action="store_true",
+        help="scale tessellation tolerances to the part's bbox diagonal "
+        "for higher-fidelity output (can 10×+ vertex/face counts; "
+        "default tessellates at fixed mesh=0.1mm / edge=0.05mm)",
+    )
 
 
 def _run_render(args: argparse.Namespace) -> int:
     # Local import so users without the `render` extra don't pay the
     # PyVista/VTK import cost for `validate` / `batch` / `join`.
     from freecad_validator.render.render_freecad import render_freecad_file
+
     ok = render_freecad_file(
-        args.input_fcstd, args.output_png, finer_mesh=args.finer_mesh,
+        args.input_fcstd,
+        args.output_png,
+        finer_mesh=args.finer_mesh,
     )
     return 0 if ok else 1
 
@@ -393,24 +429,44 @@ def _add_fem_score_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("candidate_fcstd", help="candidate solved FCStd to validate")
     p.add_argument("--freecad-cmd", help="path or command name for FreeCAD 1.1.0 freecadcmd")
     p.add_argument("--extract-dir", help="retain intermediate extraction JSON in this directory")
-    p.add_argument("--disp-tol", type=float, default=DISP_TOL,
-                   help="relative displacement/frequency tolerance")
-    p.add_argument("--stress-tol", type=float, default=STRESS_TOL,
-                   help="relative stress tolerance")
-    p.add_argument("--gross-tol", type=float, default=GROSS_TOL,
-                   help="critical-result relative-error validity gate")
-    p.add_argument("--mesh-budget-ratio", type=float, default=MESH_BUDGET_ZERO_RATIO,
-                   help="element-count ratio at which mesh-budget credit reaches zero")
-    p.add_argument("--require-preprocessing", action="store_true",
-                   help="require candidate geometry to differ from the raw STEP")
-    p.add_argument("--require-boolean", action="store_true",
-                   help="require the explicit minimum Boolean topology contract")
-    p.add_argument("--timeout", type=float, default=DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
-                   help="maximum seconds for each FreeCAD/CalculiX adapter process")
-    p.add_argument("--json", dest="emit_json", action="store_true",
-                   help="emit the full scoring report as JSON")
-    p.add_argument("--output-json", type=Path,
-                   help="also write the full scoring report to this path")
+    p.add_argument(
+        "--disp-tol", type=float, default=DISP_TOL, help="relative displacement/frequency tolerance"
+    )
+    p.add_argument("--stress-tol", type=float, default=STRESS_TOL, help="relative stress tolerance")
+    p.add_argument(
+        "--gross-tol",
+        type=float,
+        default=GROSS_TOL,
+        help="critical-result relative-error validity gate",
+    )
+    p.add_argument(
+        "--mesh-budget-ratio",
+        type=float,
+        default=MESH_BUDGET_ZERO_RATIO,
+        help="element-count ratio at which mesh-budget credit reaches zero",
+    )
+    p.add_argument(
+        "--require-preprocessing",
+        action="store_true",
+        help="require candidate geometry to differ from the raw STEP",
+    )
+    p.add_argument(
+        "--require-boolean",
+        action="store_true",
+        help="require the explicit minimum Boolean topology contract",
+    )
+    p.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+        help="maximum seconds for each FreeCAD/CalculiX adapter process",
+    )
+    p.add_argument(
+        "--json", dest="emit_json", action="store_true", help="emit the full scoring report as JSON"
+    )
+    p.add_argument(
+        "--output-json", type=Path, help="also write the full scoring report to this path"
+    )
 
 
 def _run_fem_score(args: argparse.Namespace) -> int:
@@ -451,16 +507,26 @@ def _run_fem_score(args: argparse.Namespace) -> int:
 
 
 _SUBCOMMANDS = (
-    ("validate", "score one (candidate, reference, spec) triple",
-     _add_validate_args, _run_validate),
-    ("batch", "score every case under a sample-data directory",
-     _add_batch_args, _run_batch),
-    ("join", "build a sample-data directory from separate trees",
-     _add_join_args, _run_join),
-    ("render", "rasterize a .FCStd to a PNG (requires `[render]` extra)",
-     _add_render_args, _run_render),
-    ("fem-score", "replay and score a solved FreeCAD/CalculiX analysis",
-     _add_fem_score_args, _run_fem_score),
+    (
+        "validate",
+        "score one (candidate, reference, spec) triple",
+        _add_validate_args,
+        _run_validate,
+    ),
+    ("batch", "score every case under a sample-data directory", _add_batch_args, _run_batch),
+    ("join", "build a sample-data directory from separate trees", _add_join_args, _run_join),
+    (
+        "render",
+        "rasterize a .FCStd to a PNG (requires `[render]` extra)",
+        _add_render_args,
+        _run_render,
+    ),
+    (
+        "fem-score",
+        "replay and score a solved FreeCAD/CalculiX analysis",
+        _add_fem_score_args,
+        _run_fem_score,
+    ),
 )
 
 

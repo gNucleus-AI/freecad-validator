@@ -13,6 +13,7 @@ Dependency direction is one-way: this scorer imports from
 ``freecad_validator.consistency``; nothing there imports anything
 from ``freecad_validator.scorers``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -97,10 +98,7 @@ def add_spec_tolerance_arguments(parser: argparse.ArgumentParser) -> None:
             cli_flag,
             type=float,
             default=None,
-            help=(
-                f"override {field_name} "
-                f"(default: {getattr(defaults, field_name)})"
-            ),
+            help=(f"override {field_name} (default: {getattr(defaults, field_name)})"),
         )
 
 

@@ -13,6 +13,7 @@ JSON. Two passes per case:
 Cases without a ``param_check.py`` get only the generic per-kind
 findings; the checker never reaches into a global category registry.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -67,20 +68,29 @@ _SKIP_REASON = "skip: no parametric solid (dumb body or empty)"
 
 
 def _empty_bank_report(
-    structured: StructuredSpec, fcstd_path: str, reason: str,
+    structured: StructuredSpec,
+    fcstd_path: str,
+    reason: str,
 ) -> ConsistencyReport:
     """Build a report with every spec param in `not_found` when the
     bank isn't usable (FCStd load failed or no parametric solid)."""
     report = ConsistencyReport(
-        spec_name=structured.name, fcstd_path=fcstd_path, error=reason,
+        spec_name=structured.name,
+        fcstd_path=fcstd_path,
+        error=reason,
     )
     for k, v in structured.scalars.items():
         check = DEFAULT_REGISTRY.find(k)
         unit = check.unit if check is not None else ""
         display_v = as_display_angle(v) if unit == "deg" else v
-        report.not_found.append(ParamFinding(
-            param=k, spec_value=display_v, unit=unit, reason=reason,
-        ))
+        report.not_found.append(
+            ParamFinding(
+                param=k,
+                spec_value=display_v,
+                unit=unit,
+                reason=reason,
+            )
+        )
     for k, v in structured.vectors.items():
         report.not_found.append(ParamFinding(param=k, spec_value=v, unit="mm", reason=reason))
     for k, v in structured.counts.items():
@@ -114,14 +124,16 @@ class ConsistencyChecker:
             bank = extract_bank(fcstd_path_s)
         except Exception as exc:  # defensive — caller sees a report, not a crash
             return _empty_bank_report(
-                structured, fcstd_path_s,
+                structured,
+                fcstd_path_s,
                 f"FCStd load failed: {type(exc).__name__}: {exc}",
             )
         if bank.solid_count == 0:
             return _empty_bank_report(structured, fcstd_path_s, _SKIP_REASON)
 
         report = ConsistencyReport(
-            spec_name=structured.name, fcstd_path=fcstd_path_s,
+            spec_name=structured.name,
+            fcstd_path=fcstd_path_s,
         )
 
         # --- Generic per-param checks -----------------------------------
@@ -129,13 +141,19 @@ class ConsistencyChecker:
             for key, value in source.items():
                 check = self.registry.find(key)
                 if check is None:
-                    report.not_found.append(ParamFinding(
-                        param=key, spec_value=value, unit="",
-                        reason=f"unknown property kind for key {key!r}",
-                    ))
+                    report.not_found.append(
+                        ParamFinding(
+                            param=key,
+                            spec_value=value,
+                            unit="",
+                            reason=f"unknown property kind for key {key!r}",
+                        )
+                    )
                     continue
                 bucket, finding = check.run(
-                    key, value, bank,
+                    key,
+                    value,
+                    bank,
                     tol_scalar=self.tolerances.tol_scalar,
                     tol_pos=self.tolerances.tol_pos,
                 )
@@ -162,7 +180,10 @@ class ConsistencyChecker:
         case_local = Path(fcstd_path_s).parent / "param_check.py"
         if case_local.is_file():
             _run_case_param_check(
-                case_local, report, bank, structured,
+                case_local,
+                report,
+                bank,
+                structured,
                 self.tolerances.tol_scalar,
             )
 
@@ -193,8 +214,7 @@ def _run_case_param_check(
         module = importlib.util.module_from_spec(loader_spec)
         loader_spec.loader.exec_module(module)
     except Exception as exc:
-        log.warning("param_check load failed for %s: %s: %s",
-                    path, type(exc).__name__, exc)
+        log.warning("param_check load failed for %s: %s: %s", path, type(exc).__name__, exc)
         return
 
     apply_fn = getattr(module, "apply", None)
@@ -203,8 +223,7 @@ def _run_case_param_check(
             apply_fn(report, bank, spec, tol_scalar)
             return
         except Exception as exc:
-            log.warning("param_check.apply failed for %s: %s: %s",
-                        path, type(exc).__name__, exc)
+            log.warning("param_check.apply failed for %s: %s: %s", path, type(exc).__name__, exc)
             return
 
     derived_fn = getattr(module, "derived_candidates", None)
@@ -212,8 +231,12 @@ def _run_case_param_check(
         try:
             derived = dict(derived_fn(bank, spec))
         except Exception as exc:
-            log.warning("param_check derived_candidates failed for %s: %s: %s",
-                        path, type(exc).__name__, exc)
+            log.warning(
+                "param_check derived_candidates failed for %s: %s: %s",
+                path,
+                type(exc).__name__,
+                exc,
+            )
             return
         if derived:
             _reclassify_against(report, derived, tol_scalar, "param_check")

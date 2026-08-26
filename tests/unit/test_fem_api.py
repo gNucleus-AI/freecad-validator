@@ -56,16 +56,18 @@ def test_validator_forwards_configuration() -> None:
 
 def test_fem_score_cli_emits_json(capsys) -> None:
     with patch("freecad_validator.cli.main.FEMValidator.validate", return_value=_report()):
-        code = main([
-            "fem-score",
-            "source.step",
-            "reference.FCStd",
-            "candidate.FCStd",
-            "--json",
-            "--require-boolean",
-            "--timeout",
-            "45",
-        ])
+        code = main(
+            [
+                "fem-score",
+                "source.step",
+                "reference.FCStd",
+                "candidate.FCStd",
+                "--json",
+                "--require-boolean",
+                "--timeout",
+                "45",
+            ]
+        )
 
     assert code == 0
     payload = json.loads(capsys.readouterr().out)

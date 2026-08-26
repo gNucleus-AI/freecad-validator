@@ -4,6 +4,7 @@ These exercise pure filesystem predicates, so they are deliberately
 NOT marked ``needs_freecad`` and DO run in CI. The parts that need a
 real binding live in ``tests/e2e/test_freecad_loader.py``.
 """
+
 from __future__ import annotations
 
 import os

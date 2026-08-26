@@ -7,6 +7,7 @@ Usage::
 Requires FreeCAD on PATH (so ``import FreeCAD`` works) and
 ``gnucleus-freecad-validator`` installed.
 """
+
 from __future__ import annotations
 
 import sys

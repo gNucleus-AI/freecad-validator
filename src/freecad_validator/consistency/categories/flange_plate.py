@@ -22,6 +22,7 @@ Trigger: any spec key contains one of the token groups ``{plate}`` or
 ``{lug}``. The narrower spec language for square_flange_mount uses both,
 so either one is sufficient.
 """
+
 from __future__ import annotations
 
 from freecad_validator.consistency.categories.base import Category
@@ -89,7 +90,9 @@ def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
 
 
 def _best_line_length_match(
-    bank: MeasurementBank, target: float, tol: float = 0.5,
+    bank: MeasurementBank,
+    target: float,
+    tol: float = 0.5,
 ) -> tuple[float, str] | None:
     """Find the sketch LineLength property whose value is closest to `target`.
     Returns (value, "<sketch_name>.<prop_key>") or None if no LineLength
@@ -124,7 +127,8 @@ def _bolt_hole_count(bank: MeasurementBank) -> tuple[int, str] | None:
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every flange-plate
     spec param the category can derive. Empty if the spec isn't
@@ -176,6 +180,8 @@ class FlangePlateCategory(Category):
     name = "flange_plate"
 
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

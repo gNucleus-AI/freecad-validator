@@ -5,6 +5,7 @@ Each subclass lives in `categories/<name>.py`. The base class provides
 the reclassify mechanics so subclasses only need to implement
 ``derived_candidates``.
 """
+
 from __future__ import annotations
 
 import abc
@@ -38,16 +39,22 @@ class Category(abc.ABC):
     Subclasses override ``derived_candidates`` only. Override
     ``apply()`` only if the default reclassify mechanics don't fit.
     """
+
     name: str = ""
 
     @abc.abstractmethod
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]: ...
 
     def apply(
-        self, report: ConsistencyReport, bank: MeasurementBank,
-        spec: StructuredSpec, tol_scalar: float,
+        self,
+        report: ConsistencyReport,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
+        tol_scalar: float,
     ) -> None:
         derived = self.derived_candidates(bank, spec)
         if not derived:
@@ -79,25 +86,20 @@ def _reclassify_against(
             # store derived angles in radians; specs declare them in degrees.
             # The `_angle` suffix catches hex_head_angle / hex_nut_half_angle /
             # any future *_angle key without per-category opt-in.
-            is_angle = (
-                f.param.endswith("_angle")
-                or f.param == "alpha"
-            )
+            is_angle = f.param.endswith("_angle") or f.param == "alpha"
             # rel_err is unit-free, so comparison happens in whichever
             # unit both sides carry. For angles we stored deg on the
             # spec_value (display side) earlier, so convert back to rad
             # before comparing.
-            spec_numeric = (
-                math.radians(float(f.spec_value)) if is_angle else float(f.spec_value)
-            )
+            spec_numeric = math.radians(float(f.spec_value)) if is_angle else float(f.spec_value)
             err = rel_err(spec_numeric, val)
 
             if is_angle:
                 unit = "deg"
-                spec_display: Any = f.spec_value            # already deg
+                spec_display: Any = f.spec_value  # already deg
                 measured_display: Any = as_display_angle(val)
             elif f.param == "diametral_pitch":
-                unit = "1/in"                               # inch-system reciprocal
+                unit = "1/in"  # inch-system reciprocal
                 spec_display = f.spec_value
                 measured_display = round(val, 4)
             else:
@@ -106,18 +108,28 @@ def _reclassify_against(
                 measured_display = round(val, 6)
 
             if err <= tol_scalar:
-                moved_consistent.append(make_consistent_finding(
-                    param=f.param, spec_value=spec_display,
-                    measured_value=measured_display, unit=unit, feature=ref,
-                ))
+                moved_consistent.append(
+                    make_consistent_finding(
+                        param=f.param,
+                        spec_value=spec_display,
+                        measured_value=measured_display,
+                        unit=unit,
+                        feature=ref,
+                    )
+                )
             else:
-                moved_inconsistent.append(make_inconsistent_finding(
-                    param=f.param, spec_value=spec_display,
-                    measured_value=measured_display, unit=unit, feature=ref,
-                    rel_diff=err,
-                    reason=f"derived {category_name} value disagrees "
-                           f"(rel_diff {err:.3f} > tol {tol_scalar})",
-                ))
+                moved_inconsistent.append(
+                    make_inconsistent_finding(
+                        param=f.param,
+                        spec_value=spec_display,
+                        measured_value=measured_display,
+                        unit=unit,
+                        feature=ref,
+                        rel_diff=err,
+                        reason=f"derived {category_name} value disagrees "
+                        f"(rel_diff {err:.3f} > tol {tol_scalar})",
+                    )
+                )
         return kept, moved_consistent, moved_inconsistent
 
     kept_nf, to_cons_nf, to_inc_nf = _reclass(report.not_found)

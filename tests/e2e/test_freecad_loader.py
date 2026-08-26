@@ -13,6 +13,7 @@ broken one would still pass.
 Pure path-detection logic has no FreeCAD dependency and lives in
 ``tests/unit/test_freecad_loader_paths.py`` so CI runs it.
 """
+
 from __future__ import annotations
 
 import os
@@ -27,8 +28,7 @@ from freecad_validator._freecad_loader import import_freecad
 pytestmark = pytest.mark.needs_freecad
 
 _RESOLVE = (
-    "from freecad_validator._freecad_loader import import_freecad;"
-    "print(import_freecad().__file__)"
+    "from freecad_validator._freecad_loader import import_freecad;print(import_freecad().__file__)"
 )
 
 
@@ -37,7 +37,11 @@ def _child(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k != "FREECAD_LIB"}
     env.update(env_overrides)
     return subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=300,
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=300,
     )
 
 

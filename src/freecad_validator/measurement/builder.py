@@ -17,6 +17,7 @@ paths exercised on the current test cases.
 Env requirement: FreeCAD importable (set FREECAD_LIB / PYTHONPATH via
 `source dev_setup.sh` at the repo root).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,7 +44,9 @@ class MeasurementBankBuilder:
         extractors: list[ShapeExtractor] | None = None,
         detectors: list[BankDetector] | None = None,
     ):
-        self.extractors = list(extractors) if extractors is not None else list(DEFAULT_SHAPE_EXTRACTORS)
+        self.extractors = (
+            list(extractors) if extractors is not None else list(DEFAULT_SHAPE_EXTRACTORS)
+        )
         self.detectors = list(detectors) if detectors is not None else list(DEFAULT_BANK_DETECTORS)
 
     def build(self, doc) -> MeasurementBank:
@@ -76,6 +79,7 @@ def extract(fcstd_path: str | Path) -> MeasurementBank:
     set ``PYTHONPATH`` manually.
     """
     from freecad_validator._freecad_loader import import_freecad
+
     FreeCAD = import_freecad()
 
     fcstd_path = str(fcstd_path)
@@ -122,28 +126,46 @@ def main(argv: list[str] | None = None) -> int:
     for c in bank.cylinder_clusters:
         log.info(
             "  %s: count=%d radius=%.3f axis=%s %s axial_extent=%.3f",
-            c.id, c.count, c.radius, _format_value(c.axis),
-            "convex" if c.convex else "concave", c.axial_extent,
+            c.id,
+            c.count,
+            c.radius,
+            _format_value(c.axis),
+            "convex" if c.convex else "concave",
+            c.axial_extent,
         )
     log.info("plane_pairs (%d):", len(bank.plane_pairs))
     for p in bank.plane_pairs:
         log.info(
             "  %s: offset=%.3f normal=%s min_area=%.3f",
-            p.id, p.offset, _format_value(p.normal), p.min_area,
+            p.id,
+            p.offset,
+            _format_value(p.normal),
+            p.min_area,
         )
     log.info("linear_pattern (%d):", len(bank.grids))
     for g in bank.grids:
         log.info(
             "  %s: %dx%d (%d pts) spacing=(%.3f, %.3f) origin=%s source=%s",
-            g.id, g.rows, g.columns, g.count,
-            g.spacing_rows, g.spacing_cols, _format_value(g.origin), g.source,
+            g.id,
+            g.rows,
+            g.columns,
+            g.count,
+            g.spacing_rows,
+            g.spacing_cols,
+            _format_value(g.origin),
+            g.source,
         )
     log.info("circular_patterns (%d):", len(bank.circular_patterns))
     for cp in bank.circular_patterns:
         log.info(
             "  %s: %d-fold r=%.3f pitch=%.4f rad center=%s axis=%s source=%s",
-            cp.id, cp.count, cp.pattern_radius, cp.angular_pitch,
-            _format_value(cp.center), _format_value(cp.axis), cp.source,
+            cp.id,
+            cp.count,
+            cp.pattern_radius,
+            cp.angular_pitch,
+            _format_value(cp.center),
+            _format_value(cp.axis),
+            cp.source,
         )
     log.info("feature_tree (%d):", len(bank.feature_tree))
     for e in bank.feature_tree:

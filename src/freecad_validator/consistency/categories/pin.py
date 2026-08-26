@@ -14,6 +14,7 @@ Geometric anchors:
                                    cylinder cluster (largest by
                                    convex-radius × axial-extent)
 """
+
 from __future__ import annotations
 
 from freecad_validator.consistency.categories.base import Category
@@ -134,16 +135,21 @@ def _chamfer_length_from_sketch(bank: MeasurementBank) -> tuple[float, str] | No
     does not satisfy this and is rejected.
     """
     g = bank.globals.get("aabb_sorted")
-    aabb_max = float(max(g.value)) if (
-        g is not None and isinstance(g.value, tuple) and len(g.value) == 3
-    ) else None
+    aabb_max = (
+        float(max(g.value))
+        if (g is not None and isinstance(g.value, tuple) and len(g.value) == 3)
+        else None
+    )
     for sp in bank.sketch_profiles:
         if not sp.line_lengths:
             continue
         # Distinct values (group near-equal).
         unique: list[tuple[float, int]] = []
         for ln in sorted(sp.line_lengths):
-            if not unique or abs(ln - unique[-1][0]) / max(abs(ln), abs(unique[-1][0]), 1e-9) > 1e-3:
+            if (
+                not unique
+                or abs(ln - unique[-1][0]) / max(abs(ln), abs(unique[-1][0]), 1e-9) > 1e-3
+            ):
                 unique.append((ln, 1))
             else:
                 unique[-1] = (unique[-1][0], unique[-1][1] + 1)
@@ -211,7 +217,8 @@ def _head_thickness(spec: StructuredSpec) -> float | None:
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     if not _is_pin_spec(spec):
         return {}

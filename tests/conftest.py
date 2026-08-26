@@ -20,6 +20,7 @@ module isn't available. This lets the import-only smoke tests
 (``tests/unit/test_imports.py``) verify the package's pure-Python
 surface even on hosts without FreeCAD — e.g. GitHub Actions CI.
 """
+
 from __future__ import annotations
 
 import sys

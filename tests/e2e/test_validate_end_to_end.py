@@ -1,4 +1,5 @@
 """The full validate() path against real FreeCAD geometry."""
+
 from __future__ import annotations
 
 import pytest
@@ -97,8 +98,7 @@ def test_matching_spec_scores_fully_consistent(box_10x5x3, box_spec):
 def test_wrong_spec_scores_inconsistent(tmp_path, box_10x5x3):
     """Every parameter contradicted by the geometry must be marked
     inconsistent, not quietly ignored."""
-    wrong = write_spec(tmp_path / "wrong.json",
-                       length="999 mm", width="888 mm", height="777 mm")
+    wrong = write_spec(tmp_path / "wrong.json", length="999 mm", width="888 mm", height="777 mm")
     result = _validate(box_10x5x3, box_10x5x3, wrong)
     assert result.cad_spec_consistency == pytest.approx(0.0)
 
@@ -115,8 +115,7 @@ def test_spec_score_discriminates_between_right_and_wrong(tmp_path, box_10x5x3, 
 def test_partially_wrong_spec_scores_between(tmp_path, box_10x5x3):
     """Two of three parameters right must land strictly between the
     all-right and all-wrong cases, so the score is graded not binary."""
-    partial = write_spec(tmp_path / "partial.json",
-                         length="10 mm", width="5 mm", height="777 mm")
+    partial = write_spec(tmp_path / "partial.json", length="10 mm", width="5 mm", height="777 mm")
     result = _validate(box_10x5x3, box_10x5x3, partial)
     assert 0.0 < result.cad_spec_consistency < 1.0
 
@@ -124,8 +123,7 @@ def test_partially_wrong_spec_scores_between(tmp_path, box_10x5x3):
 def test_spec_zero_gates_combined_even_with_perfect_geometry(tmp_path, box_10x5x3):
     """Identical geometry scores 1.0, but a fully wrong spec must still
     drag `combined` to 0 — neither axis can rescue the other."""
-    wrong = write_spec(tmp_path / "wrong3.json",
-                       length="999 mm", width="888 mm", height="777 mm")
+    wrong = write_spec(tmp_path / "wrong3.json", length="999 mm", width="888 mm", height="777 mm")
     result = _validate(box_10x5x3, box_10x5x3, wrong)
     assert result.geometry_similarity == pytest.approx(1.0)
     assert result.combined == 0.0

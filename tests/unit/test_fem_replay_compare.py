@@ -10,9 +10,7 @@ def _snapshot(scale=1.0):
         "node_numbers": [1, 2, 3, 4],
         "fields": {
             "DisplacementLengths": [value * scale for value in (0.0, 1.0, 2.0, 4.0)],
-            "DisplacementVectors": [
-                (0.0, 0.0, value * scale) for value in (0.0, 1.0, 2.0, 4.0)
-            ],
+            "DisplacementVectors": [(0.0, 0.0, value * scale) for value in (0.0, 1.0, 2.0, 4.0)],
             "vonMises": [value * scale for value in (0.0, 10.0, 20.0, 40.0)],
             "MaxShear": [value * scale for value in (0.0, 5.0, 10.0, 20.0)],
         },
@@ -69,8 +67,9 @@ def test_more_than_ten_percent_peak_difference_fails():
     stored["fields"]["vonMises"][-1] *= 1.11
     result = compare_result_snapshots(stored, _snapshot(), "static")
     assert result["passed"] is False
-    assert any("peak error" in failure and "exceeds 10%" in failure
-               for failure in result["failures"])
+    assert any(
+        "peak error" in failure and "exceeds 10%" in failure for failure in result["failures"]
+    )
 
 
 def test_matching_peak_with_fabricated_constant_field_fails():
@@ -89,8 +88,9 @@ def test_missing_required_static_field_fails():
     del stored["fields"]["DisplacementVectors"]
     result = compare_result_snapshots(stored, _snapshot(), "static")
     assert result["passed"] is False
-    assert any("missing required field DisplacementVectors" in failure
-               for failure in result["failures"])
+    assert any(
+        "missing required field DisplacementVectors" in failure for failure in result["failures"]
+    )
 
 
 def test_changed_node_order_and_nonfinite_field_fail():

@@ -17,6 +17,7 @@ tree — macOS Homebrew puts it under
 Set ``FREECAD_LIB`` explicitly when FreeCAD lives in a non-standard
 location — that path is tried before any built-in candidate.
 """
+
 from __future__ import annotations
 
 import os
@@ -61,8 +62,7 @@ def resolve_freecad_command(
     conda_prefix = os.environ.get("CONDA_PREFIX")
     if conda_prefix:
         candidates.extend(
-            Path(conda_prefix) / "bin" / name
-            for name in ("freecadcmd", "FreeCADCmd")
+            Path(conda_prefix) / "bin" / name for name in ("freecadcmd", "FreeCADCmd")
         )
     candidates.extend(("freecadcmd", "FreeCADCmd"))
     candidates.extend(
@@ -100,8 +100,7 @@ def _candidate_paths() -> Iterable[Path]:
     # macOS — Homebrew cask
     yield Path("/Applications/FreeCAD.app/Contents/Resources/lib")
     # macOS — Homebrew bottle (both Apple Silicon and Intel prefixes)
-    for cellar in (Path("/opt/homebrew/Cellar/freecad"),
-                   Path("/usr/local/Cellar/freecad")):
+    for cellar in (Path("/opt/homebrew/Cellar/freecad"), Path("/usr/local/Cellar/freecad")):
         if cellar.is_dir():
             yield from sorted(cellar.glob("*/lib"), reverse=True)
 
@@ -175,6 +174,7 @@ def import_freecad():
     """
     try:
         import FreeCAD  # type: ignore
+
         return FreeCAD
     except ImportError:
         pass
@@ -200,6 +200,7 @@ def import_freecad():
                 sys.path.insert(0, str(p))
         try:
             import FreeCAD  # type: ignore
+
             return FreeCAD
         except ImportError:
             # User-supplied paths didn't resolve; fall through to the
@@ -217,6 +218,7 @@ def import_freecad():
                 sys.path.insert(0, str(d))
         try:
             import FreeCAD  # type: ignore
+
             return FreeCAD
         except ImportError:
             # Bad / partial install at this path — keep looking.

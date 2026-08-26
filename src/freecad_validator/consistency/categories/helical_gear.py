@@ -37,6 +37,7 @@ When β = 0 every formula collapses to the spur case, but this category
 specs continue to be handled by `gear.py` and there's no double-claim
 overlap.
 """
+
 from __future__ import annotations
 
 import math
@@ -64,26 +65,26 @@ _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
 # combos win over single-token fallbacks.
 _CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("transverse_pressure_angle", frozenset({"transverse", "pressure", "angle"})),
-    ("transverse_module",         frozenset({"transverse", "module"})),
-    ("normal_pressure_angle",     frozenset({"normal", "pressure", "angle"})),
-    ("normal_module",             frozenset({"normal", "module"})),
-    ("helix_angle",               frozenset({"helix", "angle"})),
-    ("helix_hand",                frozenset({"helix", "hand"})),
-    ("lead",                      frozenset({"lead"})),
-    ("diametral_pitch",           frozenset({"diametral", "pitch"})),
-    ("circular_pitch",            frozenset({"circular", "pitch"})),
-    ("pressure_angle",            frozenset({"pressure", "angle"})),
-    ("outer_diameter",            frozenset({"outer", "diameter"})),
-    ("root_diameter",             frozenset({"root", "diameter"})),
-    ("base_diameter",             frozenset({"base", "diameter"})),
-    ("pitch_diameter",            frozenset({"pitch", "diameter"})),
-    ("tooth_thickness",           frozenset({"teeth", "thickness"})),
-    ("whole_depth",               frozenset({"whole", "depth"})),
-    ("module",                    frozenset({"module"})),
-    ("teeth",                     frozenset({"teeth"})),
-    ("addendum",                  frozenset({"addendum"})),
-    ("dedendum",                  frozenset({"dedendum"})),
-    ("clearance",                 frozenset({"clearance"})),
+    ("transverse_module", frozenset({"transverse", "module"})),
+    ("normal_pressure_angle", frozenset({"normal", "pressure", "angle"})),
+    ("normal_module", frozenset({"normal", "module"})),
+    ("helix_angle", frozenset({"helix", "angle"})),
+    ("helix_hand", frozenset({"helix", "hand"})),
+    ("lead", frozenset({"lead"})),
+    ("diametral_pitch", frozenset({"diametral", "pitch"})),
+    ("circular_pitch", frozenset({"circular", "pitch"})),
+    ("pressure_angle", frozenset({"pressure", "angle"})),
+    ("outer_diameter", frozenset({"outer", "diameter"})),
+    ("root_diameter", frozenset({"root", "diameter"})),
+    ("base_diameter", frozenset({"base", "diameter"})),
+    ("pitch_diameter", frozenset({"pitch", "diameter"})),
+    ("tooth_thickness", frozenset({"teeth", "thickness"})),
+    ("whole_depth", frozenset({"whole", "depth"})),
+    ("module", frozenset({"module"})),
+    ("teeth", frozenset({"teeth"})),
+    ("addendum", frozenset({"addendum"})),
+    ("dedendum", frozenset({"dedendum"})),
+    ("clearance", frozenset({"clearance"})),
 )
 
 # Cede spline-prefixed keys to `SplineCategory` (some helical-gear cases
@@ -95,10 +96,7 @@ _SPLINE_EXCLUSIVE_TOKENS: frozenset[str] = frozenset({"spline"})
 def _tokens(key: str) -> frozenset[str]:
     """Tokenize by `_`, normalizing `tooth` → `teeth` so either singular
     or plural forms classify the same."""
-    return frozenset(
-        "teeth" if t == "tooth" else t
-        for t in key.split("_")
-    )
+    return frozenset("teeth" if t == "tooth" else t for t in key.split("_"))
 
 
 def _classify_key(key: str) -> str | None:
@@ -189,26 +187,26 @@ def derive_params(
     lead = math.pi * pitch_diameter / math.tan(beta) if abs(beta) > 1e-12 else float("inf")
 
     return {
-        "module":                    m_n,
-        "normal_module":             m_n,
-        "transverse_module":         transverse_module,
-        "teeth":                     float(z),
-        "pitch_diameter":            pitch_diameter,
-        "addendum":                  addendum,
-        "dedendum":                  dedendum,
-        "whole_depth":               whole_depth,
-        "clearance":                 clearance,
-        "circular_pitch":            circular_pitch,
-        "tooth_thickness":           tooth_thickness,
-        "outer_diameter":            outer_diameter,
-        "root_diameter":             root_diameter,
-        "base_diameter":             base_diameter,
-        "pressure_angle":            alpha_n,
-        "normal_pressure_angle":     alpha_n,
+        "module": m_n,
+        "normal_module": m_n,
+        "transverse_module": transverse_module,
+        "teeth": float(z),
+        "pitch_diameter": pitch_diameter,
+        "addendum": addendum,
+        "dedendum": dedendum,
+        "whole_depth": whole_depth,
+        "clearance": clearance,
+        "circular_pitch": circular_pitch,
+        "tooth_thickness": tooth_thickness,
+        "outer_diameter": outer_diameter,
+        "root_diameter": root_diameter,
+        "base_diameter": base_diameter,
+        "pressure_angle": alpha_n,
+        "normal_pressure_angle": alpha_n,
         "transverse_pressure_angle": transverse_pressure_angle,
-        "helix_angle":               beta,
-        "diametral_pitch":           diametral_pitch,
-        "lead":                      lead,
+        "helix_angle": beta,
+        "diametral_pitch": diametral_pitch,
+        "lead": lead,
     }
 
 
@@ -253,9 +251,9 @@ def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | Non
         return None
 
     return {
-        "outer_diameter":  outer_d,
-        "root_diameter":   root_d,
-        "module":          module_n,
+        "outer_diameter": outer_d,
+        "root_diameter": root_d,
+        "module": module_n,
         "number_of_teeth": float(teeth),
     }
 
@@ -292,8 +290,7 @@ def _resolve_module(
 
     outer_match = _find_spec_value(spec, "outer_diameter")
     if outer_match is not None:
-        return (outer_match[1] / (teeth / cos_b + 2.0),
-                "spec.outer_diameter ÷ (z/cos β + 2)")
+        return (outer_match[1] / (teeth / cos_b + 2.0), "spec.outer_diameter ÷ (z/cos β + 2)")
 
     root_match = _find_spec_value(spec, "root_diameter")
     if root_match is not None:
@@ -308,7 +305,8 @@ def _resolve_module(
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every helical-gear
     param derivable from the spec (and optionally the bank's tooth ring).
@@ -359,15 +357,18 @@ def derived_candidates(
     if module_n is None:
         return {}
 
-    angle_match = _find_spec_value(spec, "pressure_angle") or \
-                  _find_spec_value(spec, "normal_pressure_angle")
+    angle_match = _find_spec_value(spec, "pressure_angle") or _find_spec_value(
+        spec, "normal_pressure_angle"
+    )
     alpha_n = angle_match[1] if angle_match is not None else DEFAULT_PRESSURE_ANGLE_RAD
 
     derived = derive_params(
-        module_n=module_n, teeth=teeth,
+        module_n=module_n,
+        teeth=teeth,
         helix_angle_rad=beta,
         normal_pressure_angle_rad=alpha_n,
-        outer_d=outer_d, root_d=root_d,
+        outer_d=outer_d,
+        root_d=root_d,
     )
 
     if outer_d is not None and root_d is not None:
@@ -429,10 +430,13 @@ def _measure_helix_hand_from_fcstd(fcstd_path: str) -> str | None:
     try:
         bodies = [o for o in doc.Objects if str(getattr(o, "TypeId", "")) == "PartDesign::Body"]
         body = next(
-            (b for b in bodies
-             if getattr(b, "Shape", None) is not None
-             and not b.Shape.isNull()
-             and float(getattr(b.Shape, "Volume", 0.0) or 0.0) > 0.0),
+            (
+                b
+                for b in bodies
+                if getattr(b, "Shape", None) is not None
+                and not b.Shape.isNull()
+                and float(getattr(b.Shape, "Volume", 0.0) or 0.0) > 0.0
+            ),
             None,
         )
         if body is None:
@@ -457,7 +461,9 @@ def _measure_helix_hand_from_fcstd(fcstd_path: str) -> str | None:
             dz = b.Z - a.Z
             if abs(dz) < 0.5:
                 continue
-            dtheta = (math.atan2(b.Y, b.X) - math.atan2(a.Y, a.X) + math.pi) % (2.0 * math.pi) - math.pi
+            dtheta = (math.atan2(b.Y, b.X) - math.atan2(a.Y, a.X) + math.pi) % (
+                2.0 * math.pi
+            ) - math.pi
             if abs(dtheta) < 1e-6:
                 continue
             if dtheta * dz > 0:
@@ -473,7 +479,9 @@ def _measure_helix_hand_from_fcstd(fcstd_path: str) -> str | None:
 
 
 def _apply_helix_hand_check(
-    report, spec: StructuredSpec, tol_scalar: float,
+    report,
+    spec: StructuredSpec,
+    tol_scalar: float,
 ) -> None:
     """Compare ``spec.strings['helix_hand']`` against the FCStd-measured
     hand and append a consistent/inconsistent finding to ``report``.
@@ -481,7 +489,9 @@ def _apply_helix_hand_check(
     No-op when the spec doesn't declare ``helix_hand``, or when the
     measurement returns None (FCStd unreadable, no tip vertices, etc).
     """
-    spec_hand = (spec.strings.get("helix_hand") or "").strip().lower() if hasattr(spec, "strings") else ""
+    spec_hand = (
+        (spec.strings.get("helix_hand") or "").strip().lower() if hasattr(spec, "strings") else ""
+    )
     if spec_hand not in ("left", "right"):
         return
 
@@ -497,33 +507,39 @@ def _apply_helix_hand_check(
     )
 
     if measured_hand == spec_hand:
-        report.consistent.append(make_consistent_finding(
-            param="helix_hand",
-            spec_value=spec_hand,
-            measured_value=measured_hand,
-            unit="",
-            feature="helical_gear.measured_hand(tip-vertex Δθ×Δz sign)",
-        ))
+        report.consistent.append(
+            make_consistent_finding(
+                param="helix_hand",
+                spec_value=spec_hand,
+                measured_value=measured_hand,
+                unit="",
+                feature="helical_gear.measured_hand(tip-vertex Δθ×Δz sign)",
+            )
+        )
     else:
-        report.inconsistent.append(make_inconsistent_finding(
-            param="helix_hand",
-            spec_value=spec_hand,
-            measured_value=measured_hand,
-            unit="",
-            feature="helical_gear.measured_hand(tip-vertex Δθ×Δz sign)",
-            rel_diff=1.0,
-            reason=(
-                f"helix hand mismatch: spec says {spec_hand!r}, CAD twists "
-                f"{measured_hand!r} (sign of Δθ × Δz at tip-cylinder vertices)"
-            ),
-        ))
+        report.inconsistent.append(
+            make_inconsistent_finding(
+                param="helix_hand",
+                spec_value=spec_hand,
+                measured_value=measured_hand,
+                unit="",
+                feature="helical_gear.measured_hand(tip-vertex Δθ×Δz sign)",
+                rel_diff=1.0,
+                reason=(
+                    f"helix hand mismatch: spec says {spec_hand!r}, CAD twists "
+                    f"{measured_hand!r} (sign of Δθ × Δz at tip-cylinder vertices)"
+                ),
+            )
+        )
 
 
 class HelicalGearCategory(Category):
     name = "helical_gear"
 
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)
 

@@ -42,6 +42,7 @@ has no direct geometric measurement path today. Defaults to 20° when
 the spec doesn't declare it (the most common modern value, but not
 universal).
 """
+
 from __future__ import annotations
 
 import math
@@ -73,22 +74,22 @@ _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
 # multi-token combos (like `pitch` + `diameter` → `pitch_diameter`) win
 # over single-token fallbacks.
 _CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
-    ("diametral_pitch",  frozenset({"diametral", "pitch"})),
-    ("circular_pitch",   frozenset({"circular", "pitch"})),
-    ("pressure_angle",   frozenset({"pressure", "angle"})),
-    ("outer_diameter",   frozenset({"outer", "diameter"})),
-    ("root_diameter",    frozenset({"root", "diameter"})),
-    ("base_diameter",    frozenset({"base", "diameter"})),
-    ("pitch_diameter",   frozenset({"pitch", "diameter"})),
+    ("diametral_pitch", frozenset({"diametral", "pitch"})),
+    ("circular_pitch", frozenset({"circular", "pitch"})),
+    ("pressure_angle", frozenset({"pressure", "angle"})),
+    ("outer_diameter", frozenset({"outer", "diameter"})),
+    ("root_diameter", frozenset({"root", "diameter"})),
+    ("base_diameter", frozenset({"base", "diameter"})),
+    ("pitch_diameter", frozenset({"pitch", "diameter"})),
     # "tooth" is normalized to "teeth" in `_tokens`, so the rule uses
     # the normalized form — otherwise `tooth_thickness` would never match.
-    ("tooth_thickness",  frozenset({"teeth", "thickness"})),
-    ("whole_depth",      frozenset({"whole", "depth"})),
-    ("module",           frozenset({"module"})),
-    ("teeth",            frozenset({"teeth"})),
-    ("addendum",         frozenset({"addendum"})),
-    ("dedendum",         frozenset({"dedendum"})),
-    ("clearance",        frozenset({"clearance"})),
+    ("tooth_thickness", frozenset({"teeth", "thickness"})),
+    ("whole_depth", frozenset({"whole", "depth"})),
+    ("module", frozenset({"module"})),
+    ("teeth", frozenset({"teeth"})),
+    ("addendum", frozenset({"addendum"})),
+    ("dedendum", frozenset({"dedendum"})),
+    ("clearance", frozenset({"clearance"})),
 )
 
 # Tokens that mark a key as belonging to the spline category, so we
@@ -99,10 +100,7 @@ _SPLINE_EXCLUSIVE_TOKENS: frozenset[str] = frozenset({"spline"})
 def _tokens(key: str) -> frozenset[str]:
     """Tokenize by `_`, normalizing `tooth` → `teeth` so either singular
     or plural forms classify the same."""
-    return frozenset(
-        "teeth" if t == "tooth" else t
-        for t in key.split("_")
-    )
+    return frozenset("teeth" if t == "tooth" else t for t in key.split("_"))
 
 
 def _classify_key(key: str) -> str | None:
@@ -201,19 +199,19 @@ def derive_params(
     clearance = dedendum - addendum
 
     return {
-        "module":           m,
-        "pitch_diameter":   pitch_diameter,
-        "addendum":         addendum,
-        "dedendum":         dedendum,
-        "whole_depth":      whole_depth,
-        "clearance":        clearance,
-        "circular_pitch":   circular_pitch,
-        "tooth_thickness":  tooth_thickness,
-        "outer_diameter":   outer_diameter,
-        "root_diameter":    root_diameter,
-        "base_diameter":    base_diameter,
-        "pressure_angle":   alpha,
-        "diametral_pitch":  diametral_pitch,
+        "module": m,
+        "pitch_diameter": pitch_diameter,
+        "addendum": addendum,
+        "dedendum": dedendum,
+        "whole_depth": whole_depth,
+        "clearance": clearance,
+        "circular_pitch": circular_pitch,
+        "tooth_thickness": tooth_thickness,
+        "outer_diameter": outer_diameter,
+        "root_diameter": root_diameter,
+        "base_diameter": base_diameter,
+        "pressure_angle": alpha,
+        "diametral_pitch": diametral_pitch,
     }
 
 
@@ -272,15 +270,16 @@ def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | Non
         return None
 
     return {
-        "outer_diameter":  outer_d,
-        "root_diameter":   root_d,
-        "module":          module,
+        "outer_diameter": outer_d,
+        "root_diameter": root_d,
+        "module": module,
         "number_of_teeth": float(teeth),
     }
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every gear param
     derivable from the bank's measured tip/root radii + teeth count.
@@ -368,8 +367,11 @@ def derived_candidates(
     alpha = angle_match[1] if angle_match is not None else DEFAULT_PRESSURE_ANGLE_RAD
 
     derived = derive_params(
-        module, teeth, alpha,
-        outer_d=outer_d, root_d=root_d,   # None → textbook proportions in derive_params
+        module,
+        teeth,
+        alpha,
+        outer_d=outer_d,
+        root_d=root_d,  # None → textbook proportions in derive_params
     )
     if outer_d is not None and root_d is not None:
         ref = (
@@ -402,6 +404,8 @@ class GearCategory(Category):
     name = "gear"
 
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

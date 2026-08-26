@@ -133,9 +133,9 @@ result = validator.validate(
     reference_fcstd="path/to/ground_truth.FCStd",
     spec_json="path/to/spec.json",
 )
-result.combined               # combined verdict, in [0, 1] (harmonic mean by default)
-result.geometry_similarity    # geometry-only sub-score
-result.cad_spec_consistency   # spec ↔ CAD sub-score
+result.combined  # combined verdict, in [0, 1] (harmonic mean by default)
+result.geometry_similarity  # geometry-only sub-score
+result.cad_spec_consistency  # spec ↔ CAD sub-score
 ```
 
 For repeated scoring, reuse one `Validator` across cases — its
@@ -217,7 +217,8 @@ three values are in `[0, 1]`.
 
 ```python
 from freecad_validator import Validator
-Validator(combine_method="min")       # use min() instead of harmonic mean
+
+Validator(combine_method="min")  # use min() instead of harmonic mean
 ```
 
 ```bash

@@ -4,6 +4,7 @@
 These are the pieces neither axis owns but both need. No inheritance
 coupling between the two trees — they simply import from here.
 """
+
 from __future__ import annotations
 
 import math
@@ -24,7 +25,8 @@ def rel_err(a: float, b: float, eps: float = 1e-9) -> float:
 
 
 def closest_scalar(
-    target: float, candidates: list[Candidate],
+    target: float,
+    candidates: list[Candidate],
 ) -> tuple[float, float, str] | None:
     """Return (measured_value, rel_err, feature_ref) of the closest
     candidate by rel_err. Returns None if candidates is empty."""

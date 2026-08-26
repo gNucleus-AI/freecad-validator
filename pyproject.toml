@@ -32,7 +32,7 @@ dependencies = [
 dev = [
     "pytest >= 7.0",
     "pytest-cov",
-    "ruff",
+    "ruff >= 0.16.3, < 0.17",
     "mypy",
 ]
 # `render` enables the `freecad-validator render` subcommand
