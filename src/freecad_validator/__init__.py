@@ -12,8 +12,7 @@ The original geometry/spec API remains available at package level::
     )
     print(result.combined, result.geometry_similarity, result.cad_spec_consistency)
 
-Placement protocols live under :mod:`freecad_validator.placement`, and solved
-FreeCAD/CalculiX FEM validation lives under :mod:`freecad_validator.fem`.
+Solved FreeCAD/CalculiX FEM validation lives under :mod:`freecad_validator.fem`.
 """
 from __future__ import annotations
 
