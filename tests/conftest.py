@@ -27,6 +27,7 @@ import sys
 import types
 
 import pytest
+from _calculix import calculix_skip_reason
 
 
 def _real_freecad_importable() -> bool:
@@ -46,30 +47,6 @@ def _real_freecad_importable() -> bool:
     except Exception:
         return False
     return getattr(freecad, "__file__", None) is not None
-
-
-def _calculix_usable() -> bool:
-    """True iff a FreeCAD subprocess can complete the FEM runtime preflight.
-
-    Delegates to the package's own preflight instead of re-deriving ccx
-    discovery here. That check runs inside FreeCAD's embedded Python, which
-    is the only interpreter that sees a bundled solver (the macOS .app ships
-    ``ccx`` beside ``freecadcmd``, invisible to ``shutil.which`` out here)
-    and FreeCAD's ``ccxBinaryPath`` preference. It also verifies the binary
-    answers ``-v``, so a present-but-broken ccx reports unusable.
-    """
-    import tempfile
-
-    from freecad_validator._freecad_loader import resolve_freecad_command
-    from freecad_validator.fem.step_interface import _runtime_preflight
-
-    try:
-        freecad_cmd = resolve_freecad_command()
-        with tempfile.TemporaryDirectory() as extract_dir:
-            _runtime_preflight(freecad_cmd, extract_dir, 30.0)
-    except Exception:
-        return False
-    return True
 
 
 # Install a no-op stub at collection time so module-level
@@ -97,8 +74,11 @@ def pytest_collection_modifyitems(config, items):
     # The probe costs a FreeCAD subprocess, so only pay for it when a test
     # in this run actually needs the solver.
     calculix_items = [item for item in items if "needs_calculix" in item.keywords]
-    if not calculix_items or _calculix_usable():
+    if not calculix_items:
         return
-    skip_marker = pytest.mark.skip(reason="CalculiX is not usable on this host")
+    reason = calculix_skip_reason()
+    if reason is None:
+        return
+    skip_marker = pytest.mark.skip(reason=reason)
     for item in calculix_items:
         item.add_marker(skip_marker)
