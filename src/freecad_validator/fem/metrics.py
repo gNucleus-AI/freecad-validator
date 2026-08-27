@@ -47,8 +47,9 @@ def tolerance_band_score(error: float, tol: float, fade: float = TOL_BAND_HI) ->
     return 100.0 * (hi - error) / (hi - lo)
 
 
-def within_tolerance(claimed: float, reference: float,
-                     tol_rel: float, tol_abs: float | None = None) -> tuple[bool, float]:
+def within_tolerance(
+    claimed: float, reference: float, tol_rel: float, tol_abs: float | None = None
+) -> tuple[bool, float]:
     """Return (within_tol, relative_error)."""
     err = relative_error(claimed, reference)
     ok = err <= tol_rel
@@ -120,8 +121,9 @@ def mesh_quality_score(quality: dict[str, float]) -> tuple[float, list[str]]:
     return max(0.0, score), notes
 
 
-def mesh_budget_score(candidate_elements: float, baseline_elements: float,
-                      zero_at: float = MESH_BUDGET_ZERO_RATIO) -> float:
+def mesh_budget_score(
+    candidate_elements: float, baseline_elements: float, zero_at: float = MESH_BUDGET_ZERO_RATIO
+) -> float:
     """Mesh-efficiency score against a baseline element count from the reference.
 
     full marks (100) at or below the baseline; linearly decaying to 0 once the
@@ -146,8 +148,9 @@ def mesh_budget_score(candidate_elements: float, baseline_elements: float,
 # --------------------------------------------------------------------------- #
 # Mesh convergence (Grid Convergence Index, Roache 1994 / Celik et al. 2008)  #
 # --------------------------------------------------------------------------- #
-def convergence_from_study(study: Sequence[dict[str, float]],
-                           rel_tol: float = 0.03) -> dict[str, Any]:
+def convergence_from_study(
+    study: Sequence[dict[str, float]], rel_tol: float = 0.03
+) -> dict[str, Any]:
     """Analyse a mesh-convergence study.
 
     ``study`` is a list of {"n_elements": N, "value": Q} ordered coarse->fine
@@ -161,11 +164,16 @@ def convergence_from_study(study: Sequence[dict[str, float]],
       apparent_order    - observed order p, if computable
       n_grids           - number of grids
     """
-    pts = sorted([p for p in study if "value" in p and "n_elements" in p],
-                 key=lambda p: p["n_elements"])
+    pts = sorted(
+        [p for p in study if "value" in p and "n_elements" in p], key=lambda p: p["n_elements"]
+    )
     out: dict[str, Any] = {
-        "n_grids": len(pts), "converged": False, "last_rel_change": None,
-        "monotonic": None, "diverging": False, "gci_fine": None,
+        "n_grids": len(pts),
+        "converged": False,
+        "last_rel_change": None,
+        "monotonic": None,
+        "diverging": False,
+        "gci_fine": None,
         "apparent_order": None,
     }
     if len(pts) < 2:
@@ -185,7 +193,7 @@ def convergence_from_study(study: Sequence[dict[str, float]],
 
     # GCI on the three finest grids with (assumed) constant refinement ratio.
     if len(pts) >= 3:
-        f1, f2, f3 = vals[-1], vals[-2], vals[-3]      # fine, medium, coarse
+        f1, f2, f3 = vals[-1], vals[-2], vals[-3]  # fine, medium, coarse
         n1, n2, n3 = pts[-1]["n_elements"], pts[-2]["n_elements"], pts[-3]["n_elements"]
         # representative cell-size ratios in 3D: h ~ N^(-1/3)
         r21 = (n1 / n2) ** (1.0 / 3.0)
@@ -198,9 +206,9 @@ def convergence_from_study(study: Sequence[dict[str, float]],
                     p = abs(math.log(abs(ratio))) / math.log(r21)
                     p = max(0.3, min(p, 6.0))
                     out["apparent_order"] = p
-                    ext = f1 + (f1 - f2) / (r21 ** p - 1.0)
+                    ext = f1 + (f1 - f2) / (r21**p - 1.0)
                     ea = abs((f1 - f2) / f1) if f1 else abs(f1 - f2)
-                    gci = 1.25 * ea / (r21 ** p - 1.0)
+                    gci = 1.25 * ea / (r21**p - 1.0)
                     out["gci_fine"] = 100.0 * gci
                     out["extrapolated"] = ext
                 except (ValueError, ZeroDivisionError):

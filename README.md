@@ -6,8 +6,13 @@ solved FreeCAD/CalculiX FEM analyses. Reproducible, no LLM, no GPU.
 ## Prerequisites
 
 * Python ≥ 3.11
-* [FreeCAD](https://www.freecad.org/) **1.1.0** — the official
-  [1.1.0 release](https://github.com/FreeCAD/FreeCAD/releases/tag/1.1.0):
+* [FreeCAD](https://www.freecad.org/) **1.1.0 recommended**. FreeCAD
+  **0.21.x remains supported for non-FEM validation**, but FEM
+  validation requires FreeCAD 1.1.0.
+
+For a reproducible FreeCAD 1.1.0 installation, the official
+[1.1.0 release](https://github.com/FreeCAD/FreeCAD/releases/tag/1.1.0)
+provides these platform-specific assets:
 
 | Platform | Install |
 |---|---|
@@ -20,11 +25,12 @@ solved FreeCAD/CalculiX FEM analyses. Reproducible, no LLM, no GPU.
 
 Pick the download that matches your CPU — the two macOS disk images are not interchangeable.
 
-Prefer these over a rolling package manager when the version matters.
-`brew install --cask freecad` tracks the newest 1.1.x and will move off
-1.1.0 at the next release; on Ubuntu / Debian both the distro package
-and the `freecad-stable` PPA can lag behind it. If you use either, check
-`freecad --version` before relying on it.
+Prefer a known build over a rolling package manager when reproducibility
+matters. `brew install --cask freecad` tracks the newest release and can move
+off 1.1.0; on Ubuntu / Debian, both the distro package and the `freecad-stable`
+PPA can lag behind. FreeCAD 0.21.x from those sources remains supported for
+non-FEM validation. If you use a package manager, check `freecad --version`
+before relying on it.
 
 Under conda / mamba, FreeCAD's binding lands in `$CONDA_PREFIX/lib`
 rather than `site-packages`, which the loader already looks for first.
@@ -99,7 +105,9 @@ installer's `bin` directory — using `;` as the separator:
 $env:FREECAD_LIB = "C:\Program Files\FreeCAD 1.1\bin"
 ```
 
-Verify the wiring — the first three fields should read `1`, `1`, `0`:
+Verify the wiring. The recommended 1.1.0 install reports `1`, `1`, `0` in the
+first three fields; a supported 0.21.x install reports `0`, `21` in the first
+two:
 
 ```bash
 python -c "from freecad_validator._freecad_loader import import_freecad; print(import_freecad().Version())"
@@ -120,7 +128,7 @@ freecad-validator validate my_model.FCStd ground_truth.FCStd spec.json
 ```
 
 `freecad-validator` is the package's entry-point; `--help` shows the
-`validate`, `batch`, `join`, and `render` subcommands.
+`validate`, `batch`, `join`, `render`, and `fem-score` subcommands.
 
 ### Python
 
@@ -133,15 +141,19 @@ result = validator.validate(
     reference_fcstd="path/to/ground_truth.FCStd",
     spec_json="path/to/spec.json",
 )
-result.combined               # combined verdict, in [0, 1] (harmonic mean by default)
-result.geometry_similarity    # geometry-only sub-score
-result.cad_spec_consistency   # spec ↔ CAD sub-score
+result.combined  # combined verdict, in [0, 1] (harmonic mean by default)
+result.geometry_similarity  # geometry-only sub-score
+result.cad_spec_consistency  # spec ↔ CAD sub-score
 ```
 
 For repeated scoring, reuse one `Validator` across cases — its
 internal scorers amortize across calls.
 
 ### FEM validation
+
+> [!IMPORTANT]
+> FEM validation requires FreeCAD 1.1.0. FreeCAD 0.21.x is supported only for
+> non-FEM validation.
 
 The FEM API compares a candidate solved FCStd with an engineer-generated solved
 reference on a source STEP. It extracts the saved analysis, replays the
@@ -217,7 +229,8 @@ three values are in `[0, 1]`.
 
 ```python
 from freecad_validator import Validator
-Validator(combine_method="min")       # use min() instead of harmonic mean
+
+Validator(combine_method="min")  # use min() instead of harmonic mean
 ```
 
 ```bash

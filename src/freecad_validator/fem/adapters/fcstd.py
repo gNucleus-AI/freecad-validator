@@ -84,9 +84,9 @@ def runtime_info(require_calculix=False):
     if not require_calculix:
         return info
 
-    configured = FreeCAD.ParamGet(
-        "User parameter:BaseApp/Preferences/Mod/Fem/Ccx"
-    ).GetString("ccxBinaryPath", "")
+    configured = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/Fem/Ccx").GetString(
+        "ccxBinaryPath", ""
+    )
     ccx = shutil.which(configured or "ccx")
     if ccx is None:
         sibling = Path(sys.executable).resolve().with_name("ccx")
@@ -103,9 +103,7 @@ def runtime_info(require_calculix=False):
         text=True,
         timeout=10,
     )
-    version_output = "\n".join(
-        part for part in (completed.stdout, completed.stderr) if part
-    )
+    version_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
     version_match = re.search(r"Version\s+([0-9]+(?:\.[0-9]+)+)", version_output)
     # Some CalculiX builds return a non-zero status after printing their version.
     # A successfully parsed version is the portable availability check.
@@ -252,15 +250,15 @@ def verify_solver_replay(doc, stored_result, analysis_type, output_path):
             raise RuntimeError("CalculiX replay produced no loaded FEM result")
         replayed_result = max(replay_results, key=lambda obj: len(obj.NodeNumbers))
         replayed_snapshot = snapshot_result_fields(replayed_result)
-        verification = compare_result_snapshots(
-            stored_snapshot, replayed_snapshot, analysis_type
+        verification = compare_result_snapshots(stored_snapshot, replayed_snapshot, analysis_type)
+        verification.update(
+            {
+                "analysis": analysis.Name,
+                "solver": solver.Name,
+                "mesh": source_mesh.Name,
+                "node_count": len(replayed_snapshot["node_numbers"]),
+            }
         )
-        verification.update({
-            "analysis": analysis.Name,
-            "solver": solver.Name,
-            "mesh": source_mesh.Name,
-            "node_count": len(replayed_snapshot["node_numbers"]),
-        })
         return verification, extract_result_values(replayed_result)
     except Exception as exc:
         return {
@@ -290,8 +288,13 @@ def extract_material(doc):
 
 
 # CalculiX/ccxtools AnalysisType string -> scorer vocabulary
-_ANALYSIS = {"static": "static", "frequency": "modal", "thermomech": "thermal_mechanical",
-             "buckling": "buckling", "check": "static"}
+_ANALYSIS = {
+    "static": "static",
+    "frequency": "modal",
+    "thermomech": "thermal_mechanical",
+    "buckling": "buckling",
+    "check": "static",
+}
 
 
 def extract_solver(doc):
@@ -339,7 +342,7 @@ def refs_centroid(o):
             shp = getattr(obj, "Shape", None)
             if shp is None:
                 continue
-            for sub in (subs or [None]):
+            for sub in subs or [None]:
                 el = shp.getElement(sub) if sub else shp
                 c = el.CenterOfMass
                 w = getattr(el, "Area", None) or getattr(el, "Length", None) or 1.0
@@ -362,14 +365,27 @@ def extract_bcs_loads(doc):
         elif t in ("Fem::ConstraintBearing",):
             bcs.append({"type": "support", "location": refs_str(o)})
         elif t == "Fem::ConstraintForce":
-            loads.append({"type": "force", "magnitude_N": qty(o.Force, "N"),
-                          "reversed": bool(getattr(o, "Reversed", False)),
-                          "direction": force_direction(o), "centroid": refs_centroid(o),
-                          "location": refs_str(o)})
+            loads.append(
+                {
+                    "type": "force",
+                    "magnitude_N": qty(o.Force, "N"),
+                    "reversed": bool(getattr(o, "Reversed", False)),
+                    "direction": force_direction(o),
+                    "centroid": refs_centroid(o),
+                    "location": refs_str(o),
+                }
+            )
         elif t == "Fem::ConstraintPressure":
-            loads.append({"type": "pressure", "magnitude_Pa": qty(o.Pressure, "Pa"),
-                          "magnitude_N": 0, "reversed": bool(getattr(o, "Reversed", False)),
-                          "centroid": refs_centroid(o), "location": refs_str(o)})
+            loads.append(
+                {
+                    "type": "pressure",
+                    "magnitude_Pa": qty(o.Pressure, "Pa"),
+                    "magnitude_N": 0,
+                    "reversed": bool(getattr(o, "Reversed", False)),
+                    "centroid": refs_centroid(o),
+                    "location": refs_str(o),
+                }
+            )
         elif t == "Fem::ConstraintSelfWeight":
             loads.append({"type": "self_weight", "magnitude_N": 0})
     return bcs, loads
@@ -379,9 +395,9 @@ def _topo(x):
     """A Part TopoShape from either a TopoShape or a document object, else None."""
     if x is None:
         return None
-    if getattr(x, "Solids", None) is not None:   # already a TopoShape (has .Solids)
+    if getattr(x, "Solids", None) is not None:  # already a TopoShape (has .Solids)
         return x
-    return getattr(x, "Shape", None)             # a document object -> its shape
+    return getattr(x, "Shape", None)  # a document object -> its shape
 
 
 def analysed_solids(doc):
@@ -460,15 +476,18 @@ def extract_geometry(doc):
     ys = [b.YMin for b in bbs] + [b.YMax for b in bbs]
     zs = [b.ZMin for b in bbs] + [b.ZMax for b in bbs]
     dx, dy, dz = max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)
-    return {"characteristic_length_mm": (dx * dx + dy * dy + dz * dz) ** 0.5,
-            "bbox_mm": [dx, dy, dz], "volume_mm3": volume,
-            "surface_area_mm2": surface_area,
-            "num_solids": len(solids),
-            "num_compsolids": sum(len(shape.CompSolids) for shape in shapes),
-            "shape_types": sorted({str(shape.ShapeType) for shape in shapes}),
-            "num_faces": sum(region["num_faces"] for region in regions),
-            "num_edges": sum(region["num_edges"] for region in regions),
-            "regions": regions}
+    return {
+        "characteristic_length_mm": (dx * dx + dy * dy + dz * dz) ** 0.5,
+        "bbox_mm": [dx, dy, dz],
+        "volume_mm3": volume,
+        "surface_area_mm2": surface_area,
+        "num_solids": len(solids),
+        "num_compsolids": sum(len(shape.CompSolids) for shape in shapes),
+        "shape_types": sorted({str(shape.ShapeType) for shape in shapes}),
+        "num_faces": sum(region["num_faces"] for region in regions),
+        "num_edges": sum(region["num_edges"] for region in regions),
+        "regions": regions,
+    }
 
 
 def assert_safe_fcstd(path):
@@ -486,13 +505,17 @@ def assert_safe_fcstd(path):
     for name in names:
         norm = name.replace("\\", "/")
         if norm.startswith("/") or (len(norm) > 1 and norm[1] == ":"):
-            raise SystemExit(f"[fcstd_adapter] SECURITY: absolute path in FCStd zip member: {name!r}")
+            raise SystemExit(
+                f"[fcstd_adapter] SECURITY: absolute path in FCStd zip member: {name!r}"
+            )
         parts = [p for p in norm.split("/") if p not in ("", ".")]
         depth = 0
         for p in parts:
             depth += -1 if p == ".." else 1
             if depth < 0:
-                raise SystemExit(f"[fcstd_adapter] SECURITY: path traversal in FCStd zip member: {name!r}")
+                raise SystemExit(
+                    f"[fcstd_adapter] SECURITY: path traversal in FCStd zip member: {name!r}"
+                )
 
 
 def main():
@@ -582,12 +605,15 @@ def main():
                 solved_fm = cand_fm
                 break
         else:
-            solved_fm = cand_fm   # no displacement field to match against (e.g. modal)
+            solved_fm = cand_fm  # no displacement field to match against (e.g. modal)
             break
     mesh = {}
     if solved_fm is not None:
-        mesh = {"num_nodes": solved_fm.NodeCount, "num_elements": solved_fm.VolumeCount,
-                "element_type": "tet10"}
+        mesh = {
+            "num_nodes": solved_fm.NodeCount,
+            "num_elements": solved_fm.VolumeCount,
+            "element_type": "tet10",
+        }
 
     # Cheap coherence prechecks before the authoritative solver replay. Passing
     # these checks is necessary but is NOT evidence that CalculiX ran:
@@ -639,7 +665,8 @@ def main():
         )
         replay_verified = verification.get("status") == "verified"
         out_dict["solver"] = {
-            "name": "CalculiX", "converged": True,
+            "name": "CalculiX",
+            "converged": True,
             "replay_verified": replay_verified,
             "replay_accepted": True,
             "replay_status": verification.get("status"),
@@ -652,8 +679,10 @@ def main():
         # A loaded result object and matching array lengths are structural checks,
         # not proof that CalculiX ran. Never vouch for unverified stored arrays.
         out_dict["solver"] = {
-            "name": "CalculiX", "converged": False,
-            "replay_verified": False, "replay_accepted": False,
+            "name": "CalculiX",
+            "converged": False,
+            "replay_verified": False,
+            "replay_accepted": False,
         }
         out_dict["artifacts"] = {}
         if verification is not None:
@@ -663,12 +692,14 @@ def main():
         if static_no_disp:
             out_dict["incoherent_result"] = (
                 f"{analysis} result reports {sorted(results)} but the displacement field is "
-                "empty - the primary solution variable is missing, so this was not solved")
+                "empty - the primary solution variable is missing, so this was not solved"
+            )
         else:
             out_dict["incoherent_result"] = (
                 f"no mesh in the document matches the {n_solved}-value displacement field "
                 "(NodeCount != len(DisplacementLengths)) - the reported mesh was not the one "
-                "solved on (mesh/result mismatch)")
+                "solved on (mesh/result mismatch)"
+            )
     elif verification is not None and not replay_accepted:
         out_dict["incoherent_result"] = (
             "stored FEM fields were not reproduced by a trusted validator-side CalculiX replay"

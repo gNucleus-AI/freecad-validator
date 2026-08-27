@@ -9,6 +9,7 @@ expected reference type.
 Return type is the same `ComparisonResult` used by the comparator layer:
 no need for a separate ScoreResult when the shape is identical.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

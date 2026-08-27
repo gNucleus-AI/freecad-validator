@@ -21,7 +21,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install .[dev]
       - name: lint
-        run: ruff check src tests
+        run: ruff check .
+
+      # Formatting is a gate, not a suggestion: an unformatted tree is a
+      # noisy diff for the next contributor. `ruff` is pinned to a minor
+      # line in the dev extra because format output is version-sensitive —
+      # an unpinned upgrade would fail this step on style, not substance.
+      - name: format
+        run: ruff format --check .
       - name: import smoke test
         # FreeCAD itself isn't on the GH runner; we still verify the
         # pure-Python surface of the package imports cleanly. Tests

@@ -17,6 +17,7 @@ Geometric anchors:
     outer_diameter          → 2 × outer_r
     thickness               → aabb[min] (axial)
 """
+
 from __future__ import annotations
 
 from freecad_validator.consistency.categories.base import Category
@@ -78,7 +79,8 @@ def _classify(key: str) -> str | None:
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     if not _is_washer_spec(spec):
         return {}

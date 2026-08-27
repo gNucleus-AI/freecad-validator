@@ -14,6 +14,7 @@ The original geometry/spec API remains available at package level::
 
 Solved FreeCAD/CalculiX FEM validation lives under :mod:`freecad_validator.fem`.
 """
+
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError

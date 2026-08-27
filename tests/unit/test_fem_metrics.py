@@ -1,6 +1,5 @@
 """Unit tests for the numeric helpers (scorer/metrics.py)."""
 
-
 from freecad_validator.fem import metrics
 
 
@@ -11,8 +10,8 @@ def test_relative_error():
 
 
 def test_tolerance_band_score_boundaries():
-    assert metrics.tolerance_band_score(0.05, 0.10) == 100.0      # inside tol
-    assert metrics.tolerance_band_score(0.10, 0.10) == 100.0      # at tol
+    assert metrics.tolerance_band_score(0.05, 0.10) == 100.0  # inside tol
+    assert metrics.tolerance_band_score(0.10, 0.10) == 100.0  # at tol
     assert metrics.tolerance_band_score(0.40, 0.10, fade=4) == 0.0  # at fade*tol
     mid = metrics.tolerance_band_score(0.25, 0.10, fade=4)
     assert 0.0 < mid < 100.0
@@ -27,19 +26,27 @@ def test_within_tolerance():
 
 def test_mesh_quality_good_vs_bad():
     good, _ = metrics.mesh_quality_score(
-        {"min_jacobian": 0.8, "max_aspect_ratio": 2.5, "max_skewness": 0.4})
+        {"min_jacobian": 0.8, "max_aspect_ratio": 2.5, "max_skewness": 0.4}
+    )
     bad, notes = metrics.mesh_quality_score(
-        {"min_jacobian": 0.2, "max_aspect_ratio": 25.0, "max_skewness": 0.98,
-         "pct_elements_below_jac": 8.0})
+        {
+            "min_jacobian": 0.2,
+            "max_aspect_ratio": 25.0,
+            "max_skewness": 0.98,
+            "pct_elements_below_jac": 8.0,
+        }
+    )
     assert good > 95
     assert bad < 40
     assert notes  # human-readable issues reported
 
 
 def test_convergence_converged():
-    study = [{"n_elements": 4000, "value": 0.96},
-             {"n_elements": 32000, "value": 0.99},
-             {"n_elements": 256000, "value": 1.00}]
+    study = [
+        {"n_elements": 4000, "value": 0.96},
+        {"n_elements": 32000, "value": 0.99},
+        {"n_elements": 256000, "value": 1.00},
+    ]
     out = metrics.convergence_from_study(study)
     assert out["converged"] is True
     assert out["n_grids"] == 3
@@ -48,9 +55,11 @@ def test_convergence_converged():
 
 
 def test_convergence_diverging_singularity():
-    study = [{"n_elements": 4000, "value": 100.0},
-             {"n_elements": 32000, "value": 160.0},
-             {"n_elements": 256000, "value": 250.0}]
+    study = [
+        {"n_elements": 4000, "value": 100.0},
+        {"n_elements": 32000, "value": 160.0},
+        {"n_elements": 256000, "value": 250.0},
+    ]
     out = metrics.convergence_from_study(study)
     assert out["converged"] is False
     assert out["diverging"] is True
@@ -63,10 +72,8 @@ def test_values_agree_and_discrepancy():
 
 
 def test_stress_unit_consistency():
-    assert metrics.stress_unit_consistent(
-        {"force": "N", "length": "mm", "stress": "MPa"}) is True
-    assert metrics.stress_unit_consistent(
-        {"force": "N", "length": "mm", "stress": "Pa"}) is False
+    assert metrics.stress_unit_consistent({"force": "N", "length": "mm", "stress": "MPa"}) is True
+    assert metrics.stress_unit_consistent({"force": "N", "length": "mm", "stress": "Pa"}) is False
     assert metrics.stress_unit_consistent({"force": "N"}) is None
 
 

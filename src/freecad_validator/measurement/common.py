@@ -4,6 +4,7 @@ Rounding (hides FP noise so equal-in-principle values compare equal) +
 geometry utilities (vector ops, FreeCAD Quantity unwrap, representative-
 shape selection).
 """
+
 from __future__ import annotations
 
 import math
@@ -42,13 +43,15 @@ def round_property(name: str, value: float) -> float:
 # --- Geometry / FreeCAD helpers --------------------------------------------
 
 # FreeCAD-side boilerplate objects that don't carry geometry we care about.
-SKIP_TYPE_IDS = frozenset({
-    "App::Origin",
-    "App::Line",
-    "App::Plane",
-    "App::DocumentObjectGroup",
-    "PartDesign::CoordinateSystem",
-})
+SKIP_TYPE_IDS = frozenset(
+    {
+        "App::Origin",
+        "App::Line",
+        "App::Plane",
+        "App::DocumentObjectGroup",
+        "PartDesign::CoordinateSystem",
+    }
+)
 
 
 def vec(v) -> tuple[float, float, float]:

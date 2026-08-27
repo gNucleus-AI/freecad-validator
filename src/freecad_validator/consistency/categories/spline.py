@@ -32,6 +32,7 @@ diameters, base_diameter, circular_pitch).
 Default pressure angle: 30° (most common on splines; used only as a
 fallback when the spec doesn't declare its own).
 """
+
 from __future__ import annotations
 
 import math
@@ -54,17 +55,17 @@ DEFAULT_PRESSURE_ANGLE_RAD = math.radians(30.0)
 # win over single-token ones (like `{'pitch'}`) when both could match.
 _CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     # Multi-token combinations first
-    ("major_diameter",   frozenset({"major", "diameter"})),
-    ("minor_diameter",   frozenset({"minor", "diameter"})),
-    ("base_diameter",    frozenset({"base", "diameter"})),
-    ("pitch_diameter",   frozenset({"pitch", "diameter"})),
-    ("circular_pitch",   frozenset({"circular", "pitch"})),
-    ("pressure_angle",   frozenset({"pressure", "angle"})),
+    ("major_diameter", frozenset({"major", "diameter"})),
+    ("minor_diameter", frozenset({"minor", "diameter"})),
+    ("base_diameter", frozenset({"base", "diameter"})),
+    ("pitch_diameter", frozenset({"pitch", "diameter"})),
+    ("circular_pitch", frozenset({"circular", "pitch"})),
+    ("pressure_angle", frozenset({"pressure", "angle"})),
     # Single-token (fallback — only match if no multi-token rule above did).
-    ("module",           frozenset({"module"})),
-    ("teeth",            frozenset({"teeth"})),
-    ("addendum",         frozenset({"addendum"})),
-    ("dedendum",         frozenset({"dedendum"})),
+    ("module", frozenset({"module"})),
+    ("teeth", frozenset({"teeth"})),
+    ("addendum", frozenset({"addendum"})),
+    ("dedendum", frozenset({"dedendum"})),
 )
 
 # Tokens that mark a key as belonging to the gear category rather than
@@ -137,16 +138,16 @@ def derive_params(
     circular_pitch = math.pi * m
 
     return {
-        "module":           m,
-        "teeth":            float(z),
-        "pitch_diameter":   pitch_diameter,
-        "pressure_angle":   alpha,
-        "major_diameter":   major_diameter,
-        "minor_diameter":   minor_diameter,
-        "base_diameter":    base_diameter,
-        "circular_pitch":   circular_pitch,
-        "addendum":         addendum,
-        "dedendum":         dedendum,
+        "module": m,
+        "teeth": float(z),
+        "pitch_diameter": pitch_diameter,
+        "pressure_angle": alpha,
+        "major_diameter": major_diameter,
+        "minor_diameter": minor_diameter,
+        "base_diameter": base_diameter,
+        "circular_pitch": circular_pitch,
+        "addendum": addendum,
+        "dedendum": dedendum,
     }
 
 
@@ -185,7 +186,8 @@ def _extract_base_triple(
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every spline-derivable
     param in the spec.
@@ -277,6 +279,8 @@ class SplineCategory(Category):
     name = "spline"
 
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

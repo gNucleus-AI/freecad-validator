@@ -13,6 +13,7 @@ broken one would still pass.
 Pure path-detection logic has no FreeCAD dependency and lives in
 ``tests/unit/test_freecad_loader_paths.py`` so CI runs it.
 """
+
 from __future__ import annotations
 
 import os
@@ -27,8 +28,7 @@ from freecad_validator._freecad_loader import import_freecad
 pytestmark = pytest.mark.needs_freecad
 
 _RESOLVE = (
-    "from freecad_validator._freecad_loader import import_freecad;"
-    "print(import_freecad().__file__)"
+    "from freecad_validator._freecad_loader import import_freecad;print(import_freecad().__file__)"
 )
 
 
@@ -37,7 +37,11 @@ def _child(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k != "FREECAD_LIB"}
     env.update(env_overrides)
     return subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=300,
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=300,
     )
 
 
@@ -70,18 +74,19 @@ def test_import_freecad_returns_a_usable_module():
     assert getattr(fc, "__file__", None)
 
 
-def test_version_is_the_pinned_release():
-    """The README pins FreeCAD 1.1.0, so the suite must be running on it.
-    A digits-only check would pass on 0.21.2 or 1.2.0 and quietly
-    validate the package against a version it does not claim to support.
+def test_version_is_supported():
+    """The README recommends 1.1.0 and supports 0.21.x for non-FEM use.
+    An overly broad digits-only check would also pass on an unsupported
+    release and quietly validate against a version outside that policy.
 
     Version() yields STRINGS, not ints — the README's verification
     snippet and any caller comparing them depend on that shape.
     """
     version = import_freecad().Version()
     assert len(version) >= 3
-    assert version[:3] == ["1", "1", "0"], (
-        f"expected FreeCAD 1.1.0 (README prerequisite), got {'.'.join(version[:3])}"
+    assert version[:3] == ["1", "1", "0"] or version[:2] == ["0", "21"], (
+        "expected FreeCAD 1.1.0 (recommended) or 0.21.x (non-FEM only), "
+        f"got {'.'.join(version[:3])}"
     )
 
 

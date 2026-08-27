@@ -25,7 +25,9 @@ def read_bbox_diagonal_from_freecad(freecad_path: str) -> float:
         FreeCAD.setActiveDocument(doc.Name)
         extents = None
         for obj in doc.Objects:
-            if not (obj.TypeId.startswith("PartDesign::Body") or obj.TypeId.startswith("Part::Feature")):
+            if not (
+                obj.TypeId.startswith("PartDesign::Body") or obj.TypeId.startswith("Part::Feature")
+            ):
                 continue
             if not (hasattr(obj, "Shape") and obj.Shape and getattr(obj.Shape, "Faces", None)):
                 continue
@@ -42,8 +44,8 @@ def read_bbox_diagonal_from_freecad(freecad_path: str) -> float:
         FreeCAD.closeDocument(doc.Name)
         if extents is None:
             return 0.0
-        dx, dy, dz = extents[3]-extents[0], extents[4]-extents[1], extents[5]-extents[2]
-        return float(np.sqrt(dx*dx + dy*dy + dz*dz))
+        dx, dy, dz = extents[3] - extents[0], extents[4] - extents[1], extents[5] - extents[2]
+        return float(np.sqrt(dx * dx + dy * dy + dz * dz))
     except Exception as e:
         logging.warning(f"Failed to read bbox from {freecad_path}: {e}")
         return 0.0
@@ -72,14 +74,20 @@ def read_tessellation_from_freecad(freecad_path: str, tolerance: float = 0.1):
                 if hasattr(obj, "Shape") and obj.Shape:
                     # Check if the shape has solid geometry (faces)
                     # Skip shapes that only have edges/wires (like spines, sketches, etc.)
-                    if hasattr(obj.Shape, 'Faces') and len(obj.Shape.Faces) > 0:
+                    if hasattr(obj.Shape, "Faces") and len(obj.Shape.Faces) > 0:
                         bodies.append(obj)
-                        logging.info(f"Added solid body: {obj.Name} with {len(obj.Shape.Faces)} faces")
+                        logging.info(
+                            f"Added solid body: {obj.Name} with {len(obj.Shape.Faces)} faces"
+                        )
                     else:
-                        logging.info(f"Skipping non-solid feature: {obj.Name} (no faces, only edges/wires)")
+                        logging.info(
+                            f"Skipping non-solid feature: {obj.Name} (no faces, only edges/wires)"
+                        )
 
         if not bodies:
-            logging.error("No solid bodies with faces found in FreeCAD file (only edges/wires/spines)")
+            logging.error(
+                "No solid bodies with faces found in FreeCAD file (only edges/wires/spines)"
+            )
             FreeCAD.closeDocument(doc.Name)
             return None, None
 
@@ -104,10 +112,14 @@ def read_tessellation_from_freecad(freecad_path: str, tolerance: float = 0.1):
             faces_array = np.array(faces, dtype=np.int64)
 
             FreeCAD.closeDocument(doc.Name)
-            logging.info(f"Loaded FreeCAD tessellation: {len(vertices_array)} vertices, {len(faces_array)} faces")
+            logging.info(
+                f"Loaded FreeCAD tessellation: {len(vertices_array)} vertices, {len(faces_array)} faces"
+            )
             return vertices_array, faces_array
 
-        logging.warning(f"Tessellation with tolerance {tolerance} failed, trying different tolerances...")
+        logging.warning(
+            f"Tessellation with tolerance {tolerance} failed, trying different tolerances..."
+        )
 
         # Try different tolerances
         for tolerance in [0.01, 0.05, 0.2, 0.5]:
@@ -115,14 +127,18 @@ def read_tessellation_from_freecad(freecad_path: str, tolerance: float = 0.1):
             tessellation = combined_shape.tessellate(tolerance)
             if tessellation and len(tessellation) >= 2:
                 vertices, faces = tessellation
-                logging.info(f"Raw tessellation (tolerance {tolerance}): {len(vertices)} vertices, {len(faces)} faces")
+                logging.info(
+                    f"Raw tessellation (tolerance {tolerance}): {len(vertices)} vertices, {len(faces)} faces"
+                )
 
                 if len(vertices) > 0 and len(faces) > 0:
                     vertices_array = np.array([[v.x, v.y, v.z] for v in vertices], dtype=float)
                     faces_array = np.array(faces, dtype=np.int64)
 
                     FreeCAD.closeDocument(doc.Name)
-                    logging.info(f"Loaded FreeCAD tessellation: {len(vertices_array)} vertices, {len(faces_array)} faces")
+                    logging.info(
+                        f"Loaded FreeCAD tessellation: {len(vertices_array)} vertices, {len(faces_array)} faces"
+                    )
                     return vertices_array, faces_array
 
         # If all tessellation attempts failed, try using Mesh module
@@ -136,7 +152,9 @@ def read_tessellation_from_freecad(freecad_path: str, tolerance: float = 0.1):
             faces_array = np.array([[f[0], f[1], f[2]] for f in mesh_obj.Facets], dtype=np.int64)
 
             FreeCAD.closeDocument(doc.Name)
-            logging.info(f"Loaded FreeCAD mesh: {len(vertices_array)} vertices, {len(faces_array)} faces")
+            logging.info(
+                f"Loaded FreeCAD mesh: {len(vertices_array)} vertices, {len(faces_array)} faces"
+            )
             return vertices_array, faces_array
 
         logging.error("All tessellation methods failed")
@@ -146,6 +164,7 @@ def read_tessellation_from_freecad(freecad_path: str, tolerance: float = 0.1):
     except Exception as e:
         logging.error(f"Failed to read FreeCAD file {freecad_path}: {e}")
         return None, None
+
 
 def read_edge_data_from_freecad(freecad_path: str, tolerance: float = 0.05):
     """
@@ -171,11 +190,15 @@ def read_edge_data_from_freecad(freecad_path: str, tolerance: float = 0.05):
                 if hasattr(obj, "Shape") and obj.Shape:
                     # Check if the shape has solid geometry (faces)
                     # Skip shapes that only have edges/wires (like spines, sketches, etc.)
-                    if hasattr(obj.Shape, 'Faces') and len(obj.Shape.Faces) > 0:
+                    if hasattr(obj.Shape, "Faces") and len(obj.Shape.Faces) > 0:
                         bodies.append(obj)
-                        logging.info(f"Added solid body: {obj.Name} with {len(obj.Shape.Faces)} faces")
+                        logging.info(
+                            f"Added solid body: {obj.Name} with {len(obj.Shape.Faces)} faces"
+                        )
                     else:
-                        logging.info(f"Skipping non-solid feature: {obj.Name} (no faces, only edges/wires)")
+                        logging.info(
+                            f"Skipping non-solid feature: {obj.Name} (no faces, only edges/wires)"
+                        )
 
         if not bodies:
             logging.error("No valid bodies found in FreeCAD file")
@@ -197,7 +220,7 @@ def read_edge_data_from_freecad(freecad_path: str, tolerance: float = 0.05):
 
                 # Convert to numpy array
                 points = np.array([[pt.x, pt.y, pt.z] for pt in discretized_pts], dtype=float)
-                edges_data.append({'points': points})
+                edges_data.append({"points": points})
 
         FreeCAD.closeDocument(doc.Name)
 
@@ -211,6 +234,7 @@ def read_edge_data_from_freecad(freecad_path: str, tolerance: float = 0.05):
 
 # ----------------------------- Rendering -----------------------------
 
+
 def render_edges_only(edge_data, out_png: str, size: int = 512, edge_color: str = "black"):
     """
     Render only edges when no mesh data is available.
@@ -218,7 +242,7 @@ def render_edges_only(edge_data, out_png: str, size: int = 512, edge_color: str 
     try:
         # Set up the plotter
         plotter = pv.Plotter(off_screen=True, window_size=[size, size])
-        plotter.background_color = '#f0f0f0'
+        plotter.background_color = "#f0f0f0"
 
         # Add lighting
         plotter.add_light(pv.Light(position=(1, 1, 1), focal_point=(0, 0, 0), intensity=0.8))
@@ -227,7 +251,7 @@ def render_edges_only(edge_data, out_png: str, size: int = 512, edge_color: str 
         # Add all edges
         all_points = []
         for e in edge_data:
-            points = e.get('points')
+            points = e.get("points")
             if points is not None and points.shape[0] > 1:
                 all_points.extend(points.tolist())
 
@@ -235,15 +259,24 @@ def render_edges_only(edge_data, out_png: str, size: int = 512, edge_color: str 
             all_points = np.array(all_points)
 
             # Calculate bounds for camera setup
-            bounds = [all_points[:, 0].min(), all_points[:, 0].max(),
-                     all_points[:, 1].min(), all_points[:, 1].max(),
-                     all_points[:, 2].min(), all_points[:, 2].max()]
-            center = [(bounds[0] + bounds[1])/2, (bounds[2] + bounds[3])/2, (bounds[4] + bounds[5])/2]
+            bounds = [
+                all_points[:, 0].min(),
+                all_points[:, 0].max(),
+                all_points[:, 1].min(),
+                all_points[:, 1].max(),
+                all_points[:, 2].min(),
+                all_points[:, 2].max(),
+            ]
+            center = [
+                (bounds[0] + bounds[1]) / 2,
+                (bounds[2] + bounds[3]) / 2,
+                (bounds[4] + bounds[5]) / 2,
+            ]
             size_val = max(bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4])
 
             # Add each edge as a line
             for e in edge_data:
-                points = e.get('points')
+                points = e.get("points")
                 if points is not None and points.shape[0] > 1:
                     # Create line segments between consecutive points
                     line_segments = []
@@ -255,7 +288,7 @@ def render_edges_only(edge_data, out_png: str, size: int = 512, edge_color: str 
                         plotter.add_lines(line_segments, color=edge_color, width=2)
 
             # Set camera
-            plotter.camera_position = 'iso'
+            plotter.camera_position = "iso"
             plotter.camera.focal_point = center
             plotter.camera.parallel_projection = True
             plotter.camera.parallel_scale = size_val * 0.8
@@ -270,6 +303,7 @@ def render_edges_only(edge_data, out_png: str, size: int = 512, edge_color: str 
         logging.error(f"Edge-only rendering failed: {e}", exc_info=True)
         return False
 
+
 def render_tessellation_with_pyvista(
     vertices: np.ndarray,
     faces: np.ndarray,
@@ -278,7 +312,7 @@ def render_tessellation_with_pyvista(
     edge_data=None,
     face_alpha: float = 1.0,
     mesh_color: str = "#87CEEB",
-    edge_color: str = "black"
+    edge_color: str = "black",
 ):
     """
     Renders a 3D mesh to a PNG using PyVista for a high-quality, smooth result.
@@ -334,7 +368,9 @@ def render_tessellation_with_pyvista(
         num_vertices_per_face = np.full((num_faces, 1), 3)
 
         # Debug the shapes before concatenation
-        logging.info(f"Before concatenation - num_vertices_per_face shape: {num_vertices_per_face.shape}, faces shape: {faces.shape}")
+        logging.info(
+            f"Before concatenation - num_vertices_per_face shape: {num_vertices_per_face.shape}, faces shape: {faces.shape}"
+        )
 
         # Prepend the '3's to the faces array
         pv_faces = np.hstack((num_vertices_per_face, faces)).flatten()
@@ -347,7 +383,7 @@ def render_tessellation_with_pyvista(
         plotter = pv.Plotter(off_screen=True, window_size=[size, size])
 
         # Set CAD-like background (light gray)
-        plotter.background_color = '#f0f0f0'
+        plotter.background_color = "#f0f0f0"
 
         # Add multiple light sources for technical CAD lighting
         plotter.add_light(pv.Light(position=(1, 1, 1), focal_point=(0, 0, 0), intensity=0.8))
@@ -363,16 +399,16 @@ def render_tessellation_with_pyvista(
             show_edges=False,  # Hide tessellation edges for cleaner look
             edge_color=edge_color,
             line_width=1,  # Thin edges
-            specular=0.1, # Less shiny for technical look
+            specular=0.1,  # Less shiny for technical look
             specular_power=5,
             metallic=0.8,  # Metallic finish
-            roughness=0.3  # Slightly rough surface
+            roughness=0.3,  # Slightly rough surface
         )
 
         # 5. (Optional) Add the separate B-Rep edges with cleaner rendering
         if edge_data:
             for e in edge_data:
-                points = e.get('points')
+                points = e.get("points")
                 if points is not None and points.shape[0] > 1:
                     # Create line segments between consecutive points
                     line_segments = []
@@ -390,7 +426,7 @@ def render_tessellation_with_pyvista(
         size = max(bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4])
 
         # Set orthographic camera
-        plotter.camera_position = 'iso'  # Isometric view
+        plotter.camera_position = "iso"  # Isometric view
         plotter.camera.focal_point = center
         plotter.camera.parallel_projection = True  # Enable orthographic projection
         plotter.camera.parallel_scale = size * 0.8  # Adjust scale for proper framing
@@ -441,7 +477,9 @@ def render_freecad_file(
             edge_tol = max(min(bbox_diag * 0.0005, 0.05), 5e-5)
         else:
             mesh_tol, edge_tol = 0.1, 0.05
-        logging.info(f"finer_mesh=True; bbox_diag={bbox_diag:.3f}mm, mesh_tol={mesh_tol:.5f}, edge_tol={edge_tol:.5f}")
+        logging.info(
+            f"finer_mesh=True; bbox_diag={bbox_diag:.3f}mm, mesh_tol={mesh_tol:.5f}, edge_tol={edge_tol:.5f}"
+        )
     else:
         mesh_tol, edge_tol = 0.1, 0.05
 
@@ -465,10 +503,14 @@ def render_freecad_file(
 
     logging.info(f"Rendering with {len(vertices)} vertices, {len(faces)} faces, {len(edges)} edges")
     return render_tessellation_with_pyvista(
-        vertices, faces, output_png_path,
-        size=512, edge_data=edges,
+        vertices,
+        faces,
+        output_png_path,
+        size=512,
+        edge_data=edges,
         face_alpha=1,
-        mesh_color="#c0c0c0", edge_color="#404040"  # Metallic gray for CAD look
+        mesh_color="#c0c0c0",
+        edge_color="#404040",  # Metallic gray for CAD look
     )
 
 

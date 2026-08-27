@@ -40,7 +40,7 @@ CATEGORIES = [
 DEFAULT_WEIGHTS: dict[str, float] = {
     "problem_setup": 0.20,
     "mesh_quality": 0.15,
-    "mesh_budget": 0.00,          # off by default; activated by reference-based scoring
+    "mesh_budget": 0.00,  # off by default; activated by reference-based scoring
     "numerical_reliability": 0.20,
     "physical_validity": 0.20,
     "accuracy_vs_reference": 0.15,
@@ -57,8 +57,8 @@ SEVERITY_PENALTY = {"info": 0.0, "minor": 8.0, "major": 30.0, "critical": 80.0}
 # Tolerance / accuracy-band configuration (correlated: change one, rest follow)#
 # --------------------------------------------------------------------------- #
 # Relative-error tolerances for comparing a candidate result to the reference.
-DISP_TOL = 0.05            # displacement / natural frequency: <= 5% rel. err = full credit
-STRESS_TOL = 0.08          # stresses (mesh-sensitive): <= 8% rel. err = full credit
+DISP_TOL = 0.05  # displacement / natural frequency: <= 5% rel. err = full credit
+STRESS_TOL = 0.08  # stresses (mesh-sensitive): <= 8% rel. err = full credit
 
 # Accuracy band shape used by metrics.tolerance_band_score:
 #   error <= TOL_BAND_LO * tol  -> 100  (full credit)
@@ -92,15 +92,15 @@ MESH_BUDGET_FLOOR_RATIO = 0.05
 # should match tightly; a gross magnitude miss or a reversed force means a DIFFERENT
 # problem was solved and GATES the score (like a wrong material), even if the result
 # numbers happen to land near the reference (the compensating-error blind spot).
-LOAD_MAG_TOL = 0.05         # force/pressure magnitude rel-error before a (minor) penalty
-LOAD_MAG_GROSS_TOL = 0.20   # ... beyond this it is the wrong load -> critical gate
+LOAD_MAG_TOL = 0.05  # force/pressure magnitude rel-error before a (minor) penalty
+LOAD_MAG_GROSS_TOL = 0.20  # ... beyond this it is the wrong load -> critical gate
 # Force DIRECTION: a load is an INPUT that must point the way the reference specifies, so the
 # candidate's net force at each loaded face is compared to the reference's by angle. Within a
 # few degrees it is the same load; past a tight bound it is a different load (a reversal is
 # just the extreme - and it even fools the accuracy check, which sees identical magnitudes).
-LOAD_DIR_ALIGNED_DEG = 6.0   # <= this: aligned, no finding
-LOAD_DIR_GATE_DEG = 15.0     # >= this: wrong load direction -> critical gate (between: penalty)
-LOAD_LOC_TOL = 0.15          # centroid offset / characteristic length before a penalty
+LOAD_DIR_ALIGNED_DEG = 6.0  # <= this: aligned, no finding
+LOAD_DIR_GATE_DEG = 15.0  # >= this: wrong load direction -> critical gate (between: penalty)
+LOAD_LOC_TOL = 0.15  # centroid offset / characteristic length before a penalty
 
 
 # --------------------------------------------------------------------------- #
@@ -143,34 +143,37 @@ class FailureMode:
 # This makes a physically impossible / hallucinated / wrong-part result fail
 # outright, no matter how polished. ACCURACY_GROSS_ERROR gates a candidate that
 # misses the reference's critical quantity by more than GROSS_TOL.
-CRITICAL_GATES: frozenset = frozenset({
-    FailureMode.PHYSICALLY_IMPOSSIBLE,
-    FailureMode.GEOMETRY_MISMATCH,
-    FailureMode.PREPROCESSING_NOT_PERFORMED,
-    FailureMode.BOOLEAN_NOT_PERFORMED,
-    FailureMode.HALLUCINATED_SOLVER_OUTPUT,
-    FailureMode.UNVERIFIED_SOLVER_OUTPUT,
-    FailureMode.MISSING_RESULTS,
-    FailureMode.SOLVER_NOT_CONVERGED,
-    FailureMode.MISSING_BOUNDARY_CONDITION,
-    FailureMode.WRONG_LOAD,
-    FailureMode.INVERTED_ELEMENTS,
-    FailureMode.HALLUCINATED_CONVERGENCE,
-    FailureMode.SINGULARITY_MISINTERPRETED,
-    FailureMode.REACTION_IMBALANCE,
-    FailureMode.NON_REPRODUCIBLE,
-    FailureMode.WRONG_ANALYSIS_TYPE,
-    FailureMode.INTERNAL_INCONSISTENCY,
-    FailureMode.FREQ_NONPHYSICAL,
-    FailureMode.BUCKLING_NONPHYSICAL,
-    FailureMode.WRONG_MATERIAL,
-    FailureMode.ACCURACY_GROSS_ERROR,
-})
+CRITICAL_GATES: frozenset = frozenset(
+    {
+        FailureMode.PHYSICALLY_IMPOSSIBLE,
+        FailureMode.GEOMETRY_MISMATCH,
+        FailureMode.PREPROCESSING_NOT_PERFORMED,
+        FailureMode.BOOLEAN_NOT_PERFORMED,
+        FailureMode.HALLUCINATED_SOLVER_OUTPUT,
+        FailureMode.UNVERIFIED_SOLVER_OUTPUT,
+        FailureMode.MISSING_RESULTS,
+        FailureMode.SOLVER_NOT_CONVERGED,
+        FailureMode.MISSING_BOUNDARY_CONDITION,
+        FailureMode.WRONG_LOAD,
+        FailureMode.INVERTED_ELEMENTS,
+        FailureMode.HALLUCINATED_CONVERGENCE,
+        FailureMode.SINGULARITY_MISINTERPRETED,
+        FailureMode.REACTION_IMBALANCE,
+        FailureMode.NON_REPRODUCIBLE,
+        FailureMode.WRONG_ANALYSIS_TYPE,
+        FailureMode.INTERNAL_INCONSISTENCY,
+        FailureMode.FREQ_NONPHYSICAL,
+        FailureMode.BUCKLING_NONPHYSICAL,
+        FailureMode.WRONG_MATERIAL,
+        FailureMode.ACCURACY_GROSS_ERROR,
+    }
+)
 
 
 @dataclass
 class Finding:
     """A single observation the scorer made about a submission."""
+
     category: str
     code: str
     severity: str
@@ -200,16 +203,16 @@ class ReferenceQuantity:
 class CaseDefinition:
     case_id: str
     title: str
-    category: str = "base"          # caller-defined grouping, e.g. "base" or "fem"
+    category: str = "base"  # caller-defined grouping, e.g. "base" or "fem"
     subtype: str = ""
-    analysis_type: str = "static"   # static|modal|buckling|thermal|thermal_mechanical|nonlinear_material|large_deformation|contact|transient
+    analysis_type: str = "static"  # static|modal|buckling|thermal|thermal_mechanical|nonlinear_material|large_deformation|contact|transient
     description: str = ""
     units_expected: dict[str, str] = field(default_factory=dict)
     geometry: dict[str, Any] = field(default_factory=dict)
     material: dict[str, Any] = field(default_factory=dict)
     expected_bcs: list[dict[str, Any]] = field(default_factory=list)
     expected_loads: list[dict[str, Any]] = field(default_factory=list)
-    reference: dict[str, Any] = field(default_factory=dict)         # {method, source, quantities:{...}}
+    reference: dict[str, Any] = field(default_factory=dict)  # {method, source, quantities:{...}}
     physical_bounds: dict[str, Any] = field(default_factory=dict)
     mesh_expectations: dict[str, Any] = field(default_factory=dict)
     rubric: dict[str, Any] = field(default_factory=dict)
@@ -266,9 +269,9 @@ class Submission:
     mesh: dict[str, Any] = field(default_factory=dict)
     solver: dict[str, Any] = field(default_factory=dict)
     results: dict[str, Any] = field(default_factory=dict)
-    reported_values: dict[str, Any] = field(default_factory=dict)   # {name:{text,table,plot}}
+    reported_values: dict[str, Any] = field(default_factory=dict)  # {name:{text,table,plot}}
     report: dict[str, Any] = field(default_factory=dict)
-    artifacts: dict[str, Any] = field(default_factory=dict)         # {name: path_or_null}
+    artifacts: dict[str, Any] = field(default_factory=dict)  # {name: path_or_null}
 
     # Caller metadata (not read by scoring logic).
     meta: dict[str, Any] = field(default_factory=dict)
@@ -297,9 +300,9 @@ class Submission:
 @dataclass
 class SubScore:
     category: str
-    raw_score: float            # 0-100 before weighting
+    raw_score: float  # 0-100 before weighting
     weight: float
-    weighted_points: float      # raw_score * weight (contribution to 0-100)
+    weighted_points: float  # raw_score * weight (contribution to 0-100)
     findings: list[dict[str, Any]] = field(default_factory=list)
 
 

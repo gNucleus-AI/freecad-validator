@@ -5,6 +5,7 @@ face_stats, cylinder_clusters, plane_pairs, feature_tree. The builder
 runs every extractor in `DEFAULT_SHAPE_EXTRACTORS` in order; adding a
 new one means dropping a subclass here and appending it to the list.
 """
+
 from __future__ import annotations
 
 import math
@@ -87,36 +88,55 @@ class GlobalsExtractor(ShapeExtractor):
 
         out = bank.globals
         out["volume"] = Measurement(
-            id="globals.volume", value=round_length(shape.Volume), unit="mm^3",
-            source="global", feature_name=owner_label,
+            id="globals.volume",
+            value=round_length(shape.Volume),
+            unit="mm^3",
+            source="global",
+            feature_name=owner_label,
         )
         out["area"] = Measurement(
-            id="globals.area", value=round_length(shape.Area), unit="mm^2",
-            source="global", feature_name=owner_label,
+            id="globals.area",
+            value=round_length(shape.Area),
+            unit="mm^2",
+            source="global",
+            feature_name=owner_label,
         )
         out["aabb_sorted"] = Measurement(
-            id="globals.aabb_sorted", value=round_length(aabb), unit="mm",
-            source="global", feature_name=owner_label,
+            id="globals.aabb_sorted",
+            value=round_length(aabb),
+            unit="mm",
+            source="global",
+            feature_name=owner_label,
         )
         out["aabb_min_corner"] = Measurement(
             id="globals.aabb_min_corner",
             value=round_length((float(bbox.XMin), float(bbox.YMin), float(bbox.ZMin))),
-            unit="mm", source="global", feature_name=owner_label,
+            unit="mm",
+            source="global",
+            feature_name=owner_label,
         )
         out["aabb_max_corner"] = Measurement(
             id="globals.aabb_max_corner",
             value=round_length((float(bbox.XMax), float(bbox.YMax), float(bbox.ZMax))),
-            unit="mm", source="global", feature_name=owner_label,
+            unit="mm",
+            source="global",
+            feature_name=owner_label,
         )
         out["obb_sorted"] = Measurement(
-            id="globals.obb_sorted", value=round_length(obb), unit="mm",
-            source="global", feature_name=owner_label,
+            id="globals.obb_sorted",
+            value=round_length(obb),
+            unit="mm",
+            source="global",
+            feature_name=owner_label,
         )
         try:
             com = shape.CenterOfMass
             out["centroid"] = Measurement(
-                id="globals.centroid", value=round_length(vec(com)), unit="mm",
-                source="global", feature_name=owner_label,
+                id="globals.centroid",
+                value=round_length(vec(com)),
+                unit="mm",
+                source="global",
+                feature_name=owner_label,
             )
         except Exception:
             pass
@@ -145,8 +165,8 @@ class FaceStatsExtractor(ShapeExtractor):
 # Cluster tolerances. Small radius tolerance prevents coalescing
 # genuinely different cylinders; the axis tolerance is generous enough
 # to survive FreeCAD's minor numerical drift.
-_RADIUS_REL_TOL = 0.01                         # 1% of mean radius
-_AXIS_DOT_TOL = math.cos(math.radians(2.0))    # same-axis if |dot| > this
+_RADIUS_REL_TOL = 0.01  # 1% of mean radius
+_AXIS_DOT_TOL = math.cos(math.radians(2.0))  # same-axis if |dot| > this
 
 
 class _PendingCluster:
@@ -314,15 +334,17 @@ class ConicSurfaceExtractor(ShapeExtractor):
                 # Past-apex parameterization — clamp to apex (radius 0).
                 r_min = 0.0
             axial_extent = abs(float(v_max) - float(v_min))
-            out.append(ConicSurface(
-                id=f"conic_surface_{len(out)}",
-                axis=round_length(axis),
-                apex=round_length(apex),
-                semi_angle=round_angle(semi_angle),
-                radius_min=round_length(r_min),
-                radius_max=round_length(r_max),
-                axial_extent=round_length(axial_extent),
-            ))
+            out.append(
+                ConicSurface(
+                    id=f"conic_surface_{len(out)}",
+                    axis=round_length(axis),
+                    apex=round_length(apex),
+                    semi_angle=round_angle(semi_angle),
+                    radius_min=round_length(r_min),
+                    radius_max=round_length(r_max),
+                    axial_extent=round_length(axial_extent),
+                )
+            )
         bank.conic_surfaces = out
 
 
@@ -335,9 +357,21 @@ class ConicSurfaceExtractor(ShapeExtractor):
 # count — useful for e.g. num_keyway when the 2nd keyway is a pattern
 # instance rather than a separate sketch/extrude.
 _SCALAR_PROP_NAMES: tuple[str, ...] = (
-    "Length", "Length2", "Radius", "Radius1", "Radius2",
-    "Diameter", "Depth", "Size", "Height", "Width",
-    "Angle", "Angle1", "Angle2", "MajorRadius", "MinorRadius",
+    "Length",
+    "Length2",
+    "Radius",
+    "Radius1",
+    "Radius2",
+    "Diameter",
+    "Depth",
+    "Size",
+    "Height",
+    "Width",
+    "Angle",
+    "Angle1",
+    "Angle2",
+    "MajorRadius",
+    "MinorRadius",
     "Occurrences",
 )
 
@@ -401,10 +435,7 @@ def _harvest_sketch_geometry(
     if constraints:
         for i, c in enumerate(constraints):
             t = getattr(c, "Type", None)
-            is_angle = (
-                (isinstance(t, str) and "Angle" in t)
-                or (isinstance(t, int) and t == 9)
-            )
+            is_angle = (isinstance(t, str) and "Angle" in t) or (isinstance(t, int) and t == 9)
             if not is_angle:
                 continue
             val = as_float(getattr(c, "Value", None))

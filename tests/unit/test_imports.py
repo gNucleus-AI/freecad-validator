@@ -3,6 +3,7 @@
 These run in CI without FreeCAD installed and fail loudly on any
 broken import in the public surface of the package.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -51,11 +52,26 @@ def test_categories_are_registered_class_per_file():
         washer,
     )
 
-    for mod in (box, flange_plate, gear, hex, impeller, key, keyway, pin,
-                pulley, spline, spring, spring_clip, washer):
+    for mod in (
+        box,
+        flange_plate,
+        gear,
+        hex,
+        impeller,
+        key,
+        keyway,
+        pin,
+        pulley,
+        spline,
+        spring,
+        spring_clip,
+        washer,
+    ):
         cat_subclasses = [
-            getattr(mod, name) for name in dir(mod)
-            if name.endswith("Category") and isinstance(getattr(mod, name), type)
+            getattr(mod, name)
+            for name in dir(mod)
+            if name.endswith("Category")
+            and isinstance(getattr(mod, name), type)
             and issubclass(getattr(mod, name), base.Category)
         ]
         assert cat_subclasses, f"{mod.__name__} has no Category subclass"

@@ -4,6 +4,7 @@ Covers builder/extractors/detectors, which the FreeCAD-free suite
 cannot reach: every value here comes from opening a real document and
 interrogating its shape.
 """
+
 from __future__ import annotations
 
 import pytest

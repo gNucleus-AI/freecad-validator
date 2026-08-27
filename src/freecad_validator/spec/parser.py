@@ -17,6 +17,7 @@ Supported value forms (one per comma- or newline-separated chunk):
 Non-numeric values (e.g. `section_1_type = smooth shaft`) are silently
 skipped — the classifier only operates on measurable params.
 """
+
 from __future__ import annotations
 
 import json

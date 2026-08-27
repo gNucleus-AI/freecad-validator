@@ -4,6 +4,7 @@ The CLI is the documented entry point in the README, so its argument
 wiring and output contract are worth exercising against real files
 rather than mocks.
 """
+
 from __future__ import annotations
 
 import json
@@ -44,8 +45,16 @@ def test_validate_json_reports_a_difference(capsys, box_10x5x3, box_20x5x3, box_
 
 
 def test_combine_method_flag_is_applied(capsys, box_10x5x3, box_20x5x3, box_spec):
-    out = _run(capsys, "validate", str(box_20x5x3), str(box_10x5x3), str(box_spec),
-               "--json", "--combine-method", "min")
+    out = _run(
+        capsys,
+        "validate",
+        str(box_20x5x3),
+        str(box_10x5x3),
+        str(box_spec),
+        "--json",
+        "--combine-method",
+        "min",
+    )
     payload = json.loads(out)
     assert payload["combined"] == pytest.approx(
         min(payload["geometry_similarity"], payload["cad_spec_consistency"])
@@ -54,6 +63,14 @@ def test_combine_method_flag_is_applied(capsys, box_10x5x3, box_20x5x3, box_spec
 
 def test_tolerance_flag_is_accepted(capsys, box_10x5x3, box_20x5x3, box_spec):
     """Loosening the volume tolerance must not crash the arg wiring."""
-    out = _run(capsys, "validate", str(box_20x5x3), str(box_10x5x3), str(box_spec),
-               "--json", "--volume-far-rel-tol", "5.0")
+    out = _run(
+        capsys,
+        "validate",
+        str(box_20x5x3),
+        str(box_10x5x3),
+        str(box_spec),
+        "--json",
+        "--volume-far-rel-tol",
+        "5.0",
+    )
     assert 0.0 <= json.loads(out)["geometry_similarity"] <= 1.0

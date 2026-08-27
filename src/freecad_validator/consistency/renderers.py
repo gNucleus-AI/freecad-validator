@@ -1,4 +1,5 @@
 """Report renderers — text (terminal), markdown (LLM-friendly), JSON."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -29,8 +30,7 @@ def render_text(report: ConsistencyReport) -> str:
             f"not_found={s.not_found}  unexpected_features={s.unexpected_features}"
         )
         lines.append(
-            f"Consistency rate: {s.consistency_rate:.1%}   "
-            f"Measurable rate: {s.measurable_rate:.1%}"
+            f"Consistency rate: {s.consistency_rate:.1%}   Measurable rate: {s.measurable_rate:.1%}"
         )
     lines.append("")
     lines.append(f"Consistent ({len(report.consistent)}):")
@@ -122,10 +122,7 @@ def render_markdown(report: ConsistencyReport) -> str:
         lines.append("| Param | Spec value | Unit | Reason |")
         lines.append("|---|---|---|---|")
         for f in report.not_found:
-            lines.append(
-                f"| `{f.param}` | {_fmt(f.spec_value)} | {f.unit} |"
-                f" {f.reason or ''} |"
-            )
+            lines.append(f"| `{f.param}` | {_fmt(f.spec_value)} | {f.unit} | {f.reason or ''} |")
     else:
         lines.append("_(none)_")
     lines.append("")
@@ -144,9 +141,9 @@ def render_json(report: ConsistencyReport) -> str:
 
 
 RENDERERS: dict[str, Callable[[ConsistencyReport], str]] = {
-    "text":     render_text,
+    "text": render_text,
     "markdown": render_markdown,
-    "json":     render_json,
+    "json": render_json,
 }
 
 EXT_FOR_FORMAT: dict[str, str] = {"text": "txt", "markdown": "md", "json": "json"}

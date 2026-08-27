@@ -6,6 +6,7 @@ with typed scalar / vector / count param dicts. Concrete
 implementations pick the extraction strategy (regex rules, LLM
 fallback, etc.) and live in sibling modules.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

@@ -24,6 +24,7 @@ dimensions). This category re-anchors:
 Trigger: ``spec.name`` contains the token ``key`` but NOT ``keyway``
 (``keyway`` parts are handled by KeywayCategory).
 """
+
 from __future__ import annotations
 
 from freecad_validator.consistency.categories.base import Category
@@ -76,7 +77,8 @@ def _classify(key: str) -> str | None:
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     if not _is_key_spec(spec):
         return {}

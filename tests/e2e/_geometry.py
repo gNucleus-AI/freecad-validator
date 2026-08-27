@@ -4,6 +4,7 @@ Kept out of ``conftest.py`` so test modules can import them directly —
 pytest fixtures cannot be imported, and conftest is not an importable
 module. Every builder writes a document the caller owns and closes it.
 """
+
 from __future__ import annotations
 
 import json
@@ -71,9 +72,13 @@ def make_plain_part_box(path: Path, length: float, width: float, height: float) 
 def write_spec(path: Path, **key_parameters: str) -> Path:
     """A minimal spec dict in the shape ``parse_spec`` expects."""
     lines = "\n".join(f"- {k} = {v}" for k, v in key_parameters.items())
-    path.write_text(json.dumps({
-        "name": "test part",
-        "description": "A part built by the end-to-end fixtures.",
-        "key_parameters": lines,
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "name": "test part",
+                "description": "A part built by the end-to-end fixtures.",
+                "key_parameters": lines,
+            }
+        )
+    )
     return path

@@ -24,15 +24,22 @@ Algorithm:
     pair on how well their candidate dimension matches the spec value,
     and pick the closest.
 """
+
 from __future__ import annotations
 
 from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
 
-_LENGTHLIKE_TOKENS: frozenset[str] = frozenset({
-    "length", "width", "height", "depth", "thickness",
-})
+_LENGTHLIKE_TOKENS: frozenset[str] = frozenset(
+    {
+        "length",
+        "width",
+        "height",
+        "depth",
+        "thickness",
+    }
+)
 
 # Nouns that are "body parts" of the whole part (sub-bodies in a
 # compound prismatic shape), as opposed to FEATURES on a single body
@@ -40,12 +47,34 @@ _LENGTHLIKE_TOKENS: frozenset[str] = frozenset({
 # `<feature>_<dim>` keys — those are owned by feature-specific
 # categories (hex hub, flange head, etc.) or fall back to the generic
 # checker.
-_FEATURE_NOUNS: frozenset[str] = frozenset({
-    "head", "hub", "shaft", "neck", "groove", "chamfer", "fillet",
-    "rim", "bore", "hole", "lip", "boss", "stud",
-    "tooth", "thread", "helix", "spline", "key", "keyway",
-    "tip", "root", "pitch", "wall", "pin",
-})
+_FEATURE_NOUNS: frozenset[str] = frozenset(
+    {
+        "head",
+        "hub",
+        "shaft",
+        "neck",
+        "groove",
+        "chamfer",
+        "fillet",
+        "rim",
+        "bore",
+        "hole",
+        "lip",
+        "boss",
+        "stud",
+        "tooth",
+        "thread",
+        "helix",
+        "spline",
+        "key",
+        "keyway",
+        "tip",
+        "root",
+        "pitch",
+        "wall",
+        "pin",
+    }
+)
 
 
 def _tokens(key: str) -> frozenset[str]:
@@ -131,8 +160,11 @@ def _sketch_extrude_pairs(bank: MeasurementBank):
     for ft in bank.feature_tree:
         type_id, name, props = ft.type_id, ft.name, ft.properties
         if type_id == "Sketcher::SketchObject":
-            raw = [float(v) for k, v in props.items()
-                   if "LineLength" in k and isinstance(v, (int, float))]
+            raw = [
+                float(v)
+                for k, v in props.items()
+                if "LineLength" in k and isinstance(v, (int, float))
+            ]
             pending_sketch = (name, _unique_sorted_desc(raw))
         elif type_id == "PartDesign::Pad" and pending_sketch is not None:
             ex_len = float(props.get("Length", 0.0)) if "Length" in props else None
@@ -175,7 +207,8 @@ def _best_pair_for_value(pairs, dim: str, target: float):
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     if not _is_box_spec(spec):
         return {}

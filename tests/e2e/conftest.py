@@ -9,6 +9,7 @@ version ships different kernels on different channels (the official
 The whole package is marked ``needs_freecad`` — CI deselects it.
 Builders live in ``_geometry.py`` so test modules can import them.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,5 +39,7 @@ def cylinder_r4_h12(tmp_path_factory) -> Path:
 def box_spec(tmp_path_factory) -> Path:
     return write_spec(
         tmp_path_factory.mktemp("spec") / "box_spec.json",
-        length="10 mm", width="5 mm", height="3 mm",
+        length="10 mm",
+        width="5 mm",
+        height="3 mm",
     )

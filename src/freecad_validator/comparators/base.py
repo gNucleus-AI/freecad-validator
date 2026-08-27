@@ -9,6 +9,7 @@ It returns a `ComparisonResult(score, reason, details)`. The top-level
 `score` is always normalized to [0, 1] so downstream code can treat
 comparators uniformly.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

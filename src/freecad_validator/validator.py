@@ -24,6 +24,7 @@ Spec-consistency reads an optional case-local ``param_check.py``
 sitting next to the candidate FCStd; without one, only the generic
 per-kind checks run.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -134,12 +135,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("candidate_fcstd", help="Path to the candidate .FCStd")
     parser.add_argument("reference_fcstd", help="Path to the reference .FCStd")
     parser.add_argument("spec_json", help="Path to the spec .json")
-    parser.add_argument("--json", dest="emit_json", action="store_true",
-                        help="emit the result as JSON on stdout")
-    parser.add_argument("--combine-method", choices=COMBINE_METHODS,
-                        default=DEFAULT_COMBINE_METHOD,
-                        help="how to aggregate the two sub-scores into `combined` "
-                             f"(default: {DEFAULT_COMBINE_METHOD})")
+    parser.add_argument(
+        "--json", dest="emit_json", action="store_true", help="emit the result as JSON on stdout"
+    )
+    parser.add_argument(
+        "--combine-method",
+        choices=COMBINE_METHODS,
+        default=DEFAULT_COMBINE_METHOD,
+        help="how to aggregate the two sub-scores into `combined` "
+        f"(default: {DEFAULT_COMBINE_METHOD})",
+    )
     add_tolerance_arguments(parser)
     add_spec_tolerance_arguments(parser)
     args = parser.parse_args(argv)

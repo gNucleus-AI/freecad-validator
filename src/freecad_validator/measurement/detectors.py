@@ -7,6 +7,7 @@ the FreeCAD shape directly. Two concrete detectors today:
   - `LinearPatternDetector` — rectangular / 1-D grids
   - `CircularPatternDetector` — N-fold rotational symmetry
 """
+
 from __future__ import annotations
 
 import math
@@ -178,8 +179,10 @@ class LinearPatternDetector(BankDetector):
                         id=f"grid_{grid_idx}",
                         source=f"sketch:{entry.name}@r={radius:g}",
                         count=len(centers),
-                        rows=rows, columns=cols,
-                        spacing_rows=sp_rows, spacing_cols=sp_cols,
+                        rows=rows,
+                        columns=cols,
+                        spacing_rows=sp_rows,
+                        spacing_cols=sp_cols,
                         origin=origin,
                     )
                 )
@@ -198,8 +201,10 @@ class LinearPatternDetector(BankDetector):
                     id=f"grid_{grid_idx}",
                     source=f"cluster:{cluster.id}",
                     count=cluster.count,
-                    rows=rows, columns=cols,
-                    spacing_rows=sp_rows, spacing_cols=sp_cols,
+                    rows=rows,
+                    columns=cols,
+                    spacing_rows=sp_rows,
+                    spacing_cols=sp_cols,
                     origin=origin,
                 )
             )
@@ -404,22 +409,29 @@ class SketchProfileDetector(BankDetector):
 
     @staticmethod
     def _values(props, prefix: str, suffix: str) -> list[float]:
-        out = [v for k, v in props.items()
-               if k.startswith(prefix) and k.endswith(suffix)
-               and isinstance(v, (int, float))]
+        out = [
+            v
+            for k, v in props.items()
+            if k.startswith(prefix) and k.endswith(suffix) and isinstance(v, (int, float))
+        ]
         return sorted((float(v) for v in out), reverse=True)
 
     @staticmethod
     def _line_angles(props) -> list[float]:
-        out = [v for k, v in props.items()
-               if k.startswith("LineAngle[") and isinstance(v, (int, float))]
+        out = [
+            v
+            for k, v in props.items()
+            if k.startswith("LineAngle[") and isinstance(v, (int, float))
+        ]
         return sorted((float(v) for v in out), reverse=True)
 
     @staticmethod
     def _constraint_angles(props) -> list[float]:
-        out = [v for k, v in props.items()
-               if k.startswith("Constraint[") and k.endswith(".Angle")
-               and isinstance(v, (int, float))]
+        out = [
+            v
+            for k, v in props.items()
+            if k.startswith("Constraint[") and k.endswith(".Angle") and isinstance(v, (int, float))
+        ]
         return sorted((float(v) for v in out), reverse=True)
 
     def detect(self, *, bank: MeasurementBank) -> None:

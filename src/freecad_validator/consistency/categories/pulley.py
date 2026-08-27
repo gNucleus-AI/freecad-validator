@@ -23,6 +23,7 @@ Geometric anchors:
     width / face_width / thickness
                                 → aabb's smallest axis
 """
+
 from __future__ import annotations
 
 from freecad_validator.consistency.categories.base import Category
@@ -64,11 +65,13 @@ def _classify(key: str) -> str | None:
         return "outer_diameter"
     # Only claim bare 'width'/'face_width'/'pulley_width' — never 'tooth_width'
     # or 'top_width' which are tooth-profile sub-dims.
-    if (toks == {"width"}
+    if (
+        toks == {"width"}
         or toks == {"face", "width"}
         or toks == {"pulley", "width"}
         or toks == {"thickness"}
-        or toks == {"face", "thickness"}):
+        or toks == {"face", "thickness"}
+    ):
         return "width"
     return None
 
@@ -89,7 +92,8 @@ def _outer_inner_radii(bank: MeasurementBank):
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     if not _is_pulley_spec(spec):
         return {}

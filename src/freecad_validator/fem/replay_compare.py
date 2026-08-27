@@ -43,12 +43,10 @@ def field_error(stored: list[Any], replayed: list[Any]) -> dict[str, Any]:
         stored_flat = [component for vector in stored for component in vector]
         replayed_flat = [component for vector in replayed for component in vector]
         stored_peak = max(
-            math.sqrt(sum(component * component for component in vector))
-            for vector in stored
+            math.sqrt(sum(component * component for component in vector)) for vector in stored
         )
         replayed_peak = max(
-            math.sqrt(sum(component * component for component in vector))
-            for vector in replayed
+            math.sqrt(sum(component * component for component in vector)) for vector in replayed
         )
     else:
         stored_flat = stored
@@ -93,9 +91,7 @@ def compare_result_snapshots(
     stored_fields = stored["fields"]
     replayed_fields = replayed["fields"]
     required = (
-        STATIC_REQUIRED_REPLAY_FIELDS
-        if analysis_type in ("static", "thermal_mechanical")
-        else ()
+        STATIC_REQUIRED_REPLAY_FIELDS if analysis_type in ("static", "thermal_mechanical") else ()
     )
     for name in required:
         if name not in stored_fields:

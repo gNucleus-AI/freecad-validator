@@ -33,6 +33,7 @@ height — which the generic `kind` dispatcher can't distinguish.
 
 Uses token-based key classification like gear / spline categories.
 """
+
 from __future__ import annotations
 
 import math
@@ -91,7 +92,8 @@ def _closest(candidates: list[tuple[float, str]], value: float) -> tuple[float, 
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every keyway-related
     spec key, sourcing candidate values from the bank's plane-pair
@@ -168,18 +170,18 @@ def derived_candidates(
         y0 = math.sqrt(bore_r * bore_r - half_w * half_w)
         depth = side + y0 - bore_r
         if depth > 0:
-            depth_cands.append((
-                depth,
-                f"keyway.depth_from_bore({entry.name}: "
-                f"R={bore_r:g}, W={width:g}, side={side:g})",
-            ))
+            depth_cands.append(
+                (
+                    depth,
+                    f"keyway.depth_from_bore({entry.name}: "
+                    f"R={bore_r:g}, W={width:g}, side={side:g})",
+                )
+            )
 
     count_cands: list[tuple[float, str]] = [
         (float(c.count), f"{c.id}.count") for c in bank.cylinder_clusters
     ]
-    count_cands.extend(
-        (float(cp.count), f"{cp.id}.count") for cp in bank.circular_patterns
-    )
+    count_cands.extend((float(cp.count), f"{cp.id}.count") for cp in bank.circular_patterns)
     # `Occurrences` on PartDesign pattern features is the direct count
     # for e.g. 2 keyways made via PolarPattern. Circular-pattern
     # detection requires N≥3 and cluster counts can't always tell how
@@ -201,10 +203,12 @@ def derived_candidates(
         if n_lines >= 4 and n_lines % 4 == 0 and n_lines <= 32:
             # Cap at 32 (8 rectangles) — more would be noise from a
             # non-keyway sketch (e.g. gear tooth profile polylines).
-            count_cands.append((
-                float(n_lines // 4),
-                f"{entry.name} rectangle count ({n_lines} lines ÷ 4)",
-            ))
+            count_cands.append(
+                (
+                    float(n_lines // 4),
+                    f"{entry.name} rectangle count ({n_lines} lines ÷ 4)",
+                )
+            )
 
     out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
@@ -241,6 +245,8 @@ class KeywayCategory(Category):
     name = "keyway"
 
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)

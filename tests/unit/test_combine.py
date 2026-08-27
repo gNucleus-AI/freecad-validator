@@ -4,6 +4,7 @@ These cover the `_combine` dispatch in `freecad_validator.validator`
 without needing FreeCAD on PATH — the helper is a pure function over
 two floats.
 """
+
 from __future__ import annotations
 
 import pytest

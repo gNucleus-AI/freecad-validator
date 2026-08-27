@@ -68,9 +68,13 @@ SUGGESTED_FIXES = {
 
 
 def _subscore(category: str, raw: float, weight: float, findings: list[Finding]) -> SubScore:
-    return SubScore(category=category, raw_score=round(raw, 2), weight=round(weight, 4),
-                    weighted_points=round(raw * weight, 3),
-                    findings=[f.to_dict() for f in findings])
+    return SubScore(
+        category=category,
+        raw_score=round(raw, 2),
+        weight=round(weight, 4),
+        weighted_points=round(raw * weight, 3),
+        findings=[f.to_dict() for f in findings],
+    )
 
 
 def score_result(case: CaseDefinition, submission: Submission) -> ScoringReport:
@@ -126,8 +130,9 @@ def score_result(case: CaseDefinition, submission: Submission) -> ScoringReport:
         "physical_validity": pv_score,
         "engineering_reporting": rep_score,
     }
-    raw_scores = {cat: max(0.0, base - cross_pen.get(cat, 0.0))
-                  for cat, base in base_scores.items()}
+    raw_scores = {
+        cat: max(0.0, base - cross_pen.get(cat, 0.0)) for cat, base in base_scores.items()
+    }
 
     # ---- weighting: score-based categories that can be N/A (accuracy, mesh_budget)
     # have their weight redistributed across the rest when not applicable ----
@@ -166,8 +171,14 @@ def score_result(case: CaseDefinition, submission: Submission) -> ScoringReport:
     gate_codes: list[str] = []
     for f in all_findings:
         if f.severity in ("major", "critical") and f.code in _KNOWN_FAILURE_CODES:
-            failure_modes.append({"code": f.code, "severity": f.severity,
-                                  "category": f.category, "evidence": f.message})
+            failure_modes.append(
+                {
+                    "code": f.code,
+                    "severity": f.severity,
+                    "category": f.category,
+                    "evidence": f.message,
+                }
+            )
         if f.severity == "critical" and f.code in CRITICAL_GATES:
             gate_codes.append(f.code)
 
@@ -180,39 +191,56 @@ def score_result(case: CaseDefinition, submission: Submission) -> ScoringReport:
     repro = validators.reproducibility_status(submission)
     crit_codes = {f.code for f in all_findings if f.severity == "critical"}
     flags = {
-        "setup_correct": raw_scores["problem_setup"] >= 70 and
-                         "WRONG_ANALYSIS_TYPE" not in crit_codes and
-                         "MISSING_BOUNDARY_CONDITION" not in crit_codes,
+        "setup_correct": raw_scores["problem_setup"] >= 70
+        and "WRONG_ANALYSIS_TYPE" not in crit_codes
+        and "MISSING_BOUNDARY_CONDITION" not in crit_codes,
         "mesh_adequate": raw_scores["mesh_quality"] >= 60 and "INVERTED_ELEMENTS" not in crit_codes,
-        "numerically_reliable": "SOLVER_NOT_CONVERGED" not in crit_codes and
-                                "HALLUCINATED_CONVERGENCE" not in crit_codes and
-                                "REACTION_IMBALANCE" not in crit_codes and
-                                "INTERNAL_INCONSISTENCY" not in crit_codes,
-        "physically_valid": "PHYSICALLY_IMPOSSIBLE" not in crit_codes and
-                            "FREQ_NONPHYSICAL" not in crit_codes and
-                            "BUCKLING_NONPHYSICAL" not in crit_codes,
-        "accurate_vs_reference": accuracy_applicable and all(
-            c["within_tol"] for c in comparisons if c["critical"]) if comparisons else None,
+        "numerically_reliable": "SOLVER_NOT_CONVERGED" not in crit_codes
+        and "HALLUCINATED_CONVERGENCE" not in crit_codes
+        and "REACTION_IMBALANCE" not in crit_codes
+        and "INTERNAL_INCONSISTENCY" not in crit_codes,
+        "physically_valid": "PHYSICALLY_IMPOSSIBLE" not in crit_codes
+        and "FREQ_NONPHYSICAL" not in crit_codes
+        and "BUCKLING_NONPHYSICAL" not in crit_codes,
+        "accurate_vs_reference": accuracy_applicable
+        and all(c["within_tol"] for c in comparisons if c["critical"])
+        if comparisons
+        else None,
         "reproducible": repro == "reproducible",
-        "not_hallucinated": not ({"HALLUCINATED_SOLVER_OUTPUT", "UNVERIFIED_SOLVER_OUTPUT",
-                                  "HALLUCINATED_CONVERGENCE", "INTERNAL_INCONSISTENCY"}
-                                 & crit_codes),
+        "not_hallucinated": not (
+            {
+                "HALLUCINATED_SOLVER_OUTPUT",
+                "UNVERIFIED_SOLVER_OUTPUT",
+                "HALLUCINATED_CONVERGENCE",
+                "INTERNAL_INCONSISTENCY",
+            }
+            & crit_codes
+        ),
         "mesh_within_budget": (raw_scores["mesh_budget"] > 0.0)
-                              if applicable["mesh_budget"] else None,
+        if applicable["mesh_budget"]
+        else None,
     }
 
     # ---- feedback & fixes ------------------------------------------------
     feedback: list[str] = []
     fixes: list[str] = []
     seen_fix = set()
-    for f in sorted(all_findings, key=lambda x: {"critical": 0, "major": 1, "minor": 2, "info": 3}[x.severity]):
+    for f in sorted(
+        all_findings, key=lambda x: {"critical": 0, "major": 1, "minor": 2, "info": 3}[x.severity]
+    ):
         if f.severity in ("critical", "major"):
             feedback.append(f"[{f.severity.upper()}/{f.category}] {f.message}")
-        if f.code in SUGGESTED_FIXES and f.code not in seen_fix and f.severity in ("critical", "major"):
+        if (
+            f.code in SUGGESTED_FIXES
+            and f.code not in seen_fix
+            and f.severity in ("critical", "major")
+        ):
             fixes.append(SUGGESTED_FIXES[f.code])
             seen_fix.add(f.code)
     if not feedback:
-        feedback.append("No major or critical issues detected; result looks sound on the checked axes.")
+        feedback.append(
+            "No major or critical issues detected; result looks sound on the checked axes."
+        )
 
     # ---- confidence ------------------------------------------------------
     confidence = _confidence(submission, accuracy_applicable, conv)
@@ -242,10 +270,21 @@ def score_result(case: CaseDefinition, submission: Submission) -> ScoringReport:
 # helpers                                                                     #
 # --------------------------------------------------------------------------- #
 _KNOWN_FAILURE_CODES = set(CRITICAL_GATES) | {
-    "POOR_MESH_QUALITY", "NO_CONVERGENCE_STUDY", "MESH_NOT_CONVERGED", "ENERGY_IMBALANCE",
-    "ACCURACY_GROSS_ERROR", "LARGE_DEFLECTION", "PARTIAL_REPRODUCIBILITY", "INCOMPLETE_REPORT",
-    "HIGH_RESIDUAL", "UNDER_RESOLVED", "MATERIAL_NOT_STATED", "BC_COUNT_LOW",
-    "MESH_BUDGET_EXCEEDED", "MESH_BUDGET_OVER", "MESH_BUDGET_UNDERRESOLVED",
+    "POOR_MESH_QUALITY",
+    "NO_CONVERGENCE_STUDY",
+    "MESH_NOT_CONVERGED",
+    "ENERGY_IMBALANCE",
+    "ACCURACY_GROSS_ERROR",
+    "LARGE_DEFLECTION",
+    "PARTIAL_REPRODUCIBILITY",
+    "INCOMPLETE_REPORT",
+    "HIGH_RESIDUAL",
+    "UNDER_RESOLVED",
+    "MATERIAL_NOT_STATED",
+    "BC_COUNT_LOW",
+    "MESH_BUDGET_EXCEEDED",
+    "MESH_BUDGET_OVER",
+    "MESH_BUDGET_UNDERRESOLVED",
 }
 
 
@@ -280,14 +319,20 @@ def _confidence(submission: Submission, accuracy_applicable: bool, conv: dict) -
 
 def _evidence(case, submission, conv, comparisons, accuracy_applicable) -> list[str]:
     ev = []
-    ev.append(f"analysis_type: required={case.analysis_type}, submitted={submission.analysis_type or 'n/a'}")
+    ev.append(
+        f"analysis_type: required={case.analysis_type}, submitted={submission.analysis_type or 'n/a'}"
+    )
     if conv.get("n_grids"):
-        ev.append(f"convergence: {conv['n_grids']} grids, converged={conv.get('converged')}, "
-                  f"last_change={conv.get('last_rel_change')}, GCI={conv.get('gci_fine')}")
+        ev.append(
+            f"convergence: {conv['n_grids']} grids, converged={conv.get('converged')}, "
+            f"last_change={conv.get('last_rel_change')}, GCI={conv.get('gci_fine')}"
+        )
     if accuracy_applicable:
         for c in comparisons:
-            ev.append(f"ref[{c['quantity']}]: claimed={c['claimed']} vs {c['reference']} {c['unit']} "
-                      f"(err={c['rel_error']}, within_tol={c['within_tol']}, {c['method']})")
-    repro = (submission.artifacts or {})
+            ev.append(
+                f"ref[{c['quantity']}]: claimed={c['claimed']} vs {c['reference']} {c['unit']} "
+                f"(err={c['rel_error']}, within_tol={c['within_tol']}, {c['method']})"
+            )
+    repro = submission.artifacts or {}
     ev.append(f"artifacts: {sorted(k for k, v in repro.items() if v)}")
     return ev

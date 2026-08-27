@@ -51,8 +51,9 @@ def _lookup(results: dict[str, Any], name: str) -> float | None:
     return None
 
 
-def compare_to_reference(case: CaseDefinition,
-                         sub: Submission) -> tuple[float | None, list[Finding], list[dict[str, Any]]]:
+def compare_to_reference(
+    case: CaseDefinition, sub: Submission
+) -> tuple[float | None, list[Finding], list[dict[str, Any]]]:
     findings: list[Finding] = []
     comparisons: list[dict[str, Any]] = []
     method = case.reference_method()
@@ -76,32 +77,70 @@ def compare_to_reference(case: CaseDefinition,
                 # reference - at least as bad as reporting it grossly wrong - so it must
                 # raise the same gating finding, not a non-gating MISSING_QUANTITY.
                 # Otherwise omitting the hardest datum could outscore reporting it incorrectly.
-                findings.append(Finding("accuracy_vs_reference", FailureMode.ACCURACY_GROSS_ERROR,
-                                        "critical",
-                                        f"Critical reference quantity '{name}' ({rq.value:g} {rq.unit}) "
-                                        "was not reported: gross failure to reproduce the critical "
-                                        "quantity.", penalty=0))
+                findings.append(
+                    Finding(
+                        "accuracy_vs_reference",
+                        FailureMode.ACCURACY_GROSS_ERROR,
+                        "critical",
+                        f"Critical reference quantity '{name}' ({rq.value:g} {rq.unit}) "
+                        "was not reported: gross failure to reproduce the critical "
+                        "quantity.",
+                        penalty=0,
+                    )
+                )
             else:
-                findings.append(Finding("accuracy_vs_reference", "MISSING_QUANTITY", "minor",
-                                        f"Reference quantity '{name}' ({rq.value:g} {rq.unit}) was not "
-                                        "reported.", penalty=0))
+                findings.append(
+                    Finding(
+                        "accuracy_vs_reference",
+                        "MISSING_QUANTITY",
+                        "minor",
+                        f"Reference quantity '{name}' ({rq.value:g} {rq.unit}) was not reported.",
+                        penalty=0,
+                    )
+                )
             weighted_scores.append((0.0, weight))
-            comparisons.append({"quantity": name, "claimed": None, "reference": rq.value,
-                                "unit": rq.unit, "rel_error": None, "tol": rq.tol_rel,
-                                "within_tol": False, "critical": rq.critical, "method": method})
+            comparisons.append(
+                {
+                    "quantity": name,
+                    "claimed": None,
+                    "reference": rq.value,
+                    "unit": rq.unit,
+                    "rel_error": None,
+                    "tol": rq.tol_rel,
+                    "within_tol": False,
+                    "critical": rq.critical,
+                    "method": method,
+                }
+            )
             continue
         ok, err = metrics.within_tolerance(claimed, rq.value, rq.tol_rel, rq.tol_abs)
         qscore = metrics.tolerance_band_score(err, rq.tol_rel)
         weighted_scores.append((qscore, weight))
-        comparisons.append({"quantity": name, "claimed": claimed, "reference": rq.value,
-                            "unit": rq.unit, "rel_error": err, "tol": rq.tol_rel,
-                            "within_tol": ok, "critical": rq.critical, "method": method})
+        comparisons.append(
+            {
+                "quantity": name,
+                "claimed": claimed,
+                "reference": rq.value,
+                "unit": rq.unit,
+                "rel_error": err,
+                "tol": rq.tol_rel,
+                "within_tol": ok,
+                "critical": rq.critical,
+                "method": method,
+            }
+        )
         if rq.critical and err > gross_tol:
-            findings.append(Finding("accuracy_vs_reference", FailureMode.ACCURACY_GROSS_ERROR, "critical",
-                                    f"'{name}' = {claimed:g} {rq.unit} is {err*100:.0f}% from the reference "
-                                    f"{rq.value:g} {rq.unit} (> gross_tol {gross_tol*100:.0f}%): gross "
-                                    "failure to reproduce the critical quantity.",
-                                    penalty=0))
+            findings.append(
+                Finding(
+                    "accuracy_vs_reference",
+                    FailureMode.ACCURACY_GROSS_ERROR,
+                    "critical",
+                    f"'{name}' = {claimed:g} {rq.unit} is {err * 100:.0f}% from the reference "
+                    f"{rq.value:g} {rq.unit} (> gross_tol {gross_tol * 100:.0f}%): gross "
+                    "failure to reproduce the critical quantity.",
+                    penalty=0,
+                )
+            )
 
     # range comparisons
     for name, spec in ranges.items():
@@ -112,15 +151,30 @@ def compare_to_reference(case: CaseDefinition,
         unit = spec.get("unit", "")
         if claimed is None:
             if critical:
-                findings.append(Finding("accuracy_vs_reference", FailureMode.ACCURACY_GROSS_ERROR,
-                                        "critical",
-                                        f"Critical reference quantity '{name}' (range [{lo}, {hi}] "
-                                        f"{unit}) was not reported: gross failure to reproduce it.",
-                                        penalty=0))
+                findings.append(
+                    Finding(
+                        "accuracy_vs_reference",
+                        FailureMode.ACCURACY_GROSS_ERROR,
+                        "critical",
+                        f"Critical reference quantity '{name}' (range [{lo}, {hi}] "
+                        f"{unit}) was not reported: gross failure to reproduce it.",
+                        penalty=0,
+                    )
+                )
             weighted_scores.append((0.0, weight))
-            comparisons.append({"quantity": name, "claimed": None, "reference": f"[{lo}, {hi}]",
-                                "unit": unit, "rel_error": None, "tol": "range",
-                                "within_tol": False, "critical": critical, "method": method})
+            comparisons.append(
+                {
+                    "quantity": name,
+                    "claimed": None,
+                    "reference": f"[{lo}, {hi}]",
+                    "unit": unit,
+                    "rel_error": None,
+                    "tol": "range",
+                    "within_tol": False,
+                    "critical": critical,
+                    "method": method,
+                }
+            )
             continue
         if lo is not None and hi is not None:
             if lo <= claimed <= hi:
@@ -132,9 +186,19 @@ def compare_to_reference(case: CaseDefinition,
                 qscore = metrics.tolerance_band_score(dist / width, 0.0 + 1e-9, fade=2.0)
                 ok = False
             weighted_scores.append((qscore, weight))
-            comparisons.append({"quantity": name, "claimed": claimed, "reference": f"[{lo}, {hi}]",
-                                "unit": unit, "rel_error": None, "tol": "range",
-                                "within_tol": ok, "critical": critical, "method": method})
+            comparisons.append(
+                {
+                    "quantity": name,
+                    "claimed": claimed,
+                    "reference": f"[{lo}, {hi}]",
+                    "unit": unit,
+                    "rel_error": None,
+                    "tol": "range",
+                    "within_tol": ok,
+                    "critical": critical,
+                    "method": method,
+                }
+            )
 
     if not weighted_scores:
         return None, findings, comparisons
@@ -146,8 +210,13 @@ def compare_to_reference(case: CaseDefinition,
     if score < 100:
         worst = [c for c in comparisons if not c["within_tol"]]
         if worst:
-            findings.append(Finding("accuracy_vs_reference", "OUT_OF_TOLERANCE",
-                                    "major" if score < 60 else "minor",
-                                    f"{len(worst)} reference quantity(ies) outside tolerance.",
-                                    penalty=0))
+            findings.append(
+                Finding(
+                    "accuracy_vs_reference",
+                    "OUT_OF_TOLERANCE",
+                    "major" if score < 60 else "minor",
+                    f"{len(worst)} reference quantity(ies) outside tolerance.",
+                    penalty=0,
+                )
+            )
     return score, findings, comparisons

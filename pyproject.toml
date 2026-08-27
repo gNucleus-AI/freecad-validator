@@ -32,12 +32,8 @@ dependencies = [
 dev = [
     "pytest >= 7.0",
     "pytest-cov",
-    "ruff",
+    "ruff >= 0.16.3, < 0.17",
     "mypy",
-]
-docs = [
-    "mkdocs-material",
-    "mkdocstrings[python]",
 ]
 # `render` enables the `freecad-validator render` subcommand
 # (rasterize a .FCStd to a PNG). PyVista pulls VTK as a transitive,

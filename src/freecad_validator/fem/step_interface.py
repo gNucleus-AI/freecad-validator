@@ -102,10 +102,7 @@ def _preprocessing_gate_report(
         float(input_geometry["surface_area_mm2"]),
         float(candidate_geometry["surface_area_mm2"]),
     )
-    if (
-        volume_diff > PREPROCESSING_VOLUME_REL_TOL
-        or area_diff > PREPROCESSING_SURFACE_AREA_REL_TOL
-    ):
+    if volume_diff > PREPROCESSING_VOLUME_REL_TOL or area_diff > PREPROCESSING_SURFACE_AREA_REL_TOL:
         return None
 
     message = (
@@ -140,16 +137,13 @@ def _preprocessing_gate_report(
     )
 
 
-def _boolean_topology_signature(
-    geometry: dict[str, Any], source: str
-) -> dict[str, Any]:
+def _boolean_topology_signature(geometry: dict[str, Any], source: str) -> dict[str, Any]:
     missing = [field for field in BOOLEAN_TOPOLOGY_FIELDS if field not in geometry]
     if "regions" not in geometry:
         missing.append("regions")
     if missing:
         raise ExtractionError(
-            f"{source} geometry is missing Boolean topology fields: "
-            + ", ".join(missing)
+            f"{source} geometry is missing Boolean topology fields: " + ", ".join(missing)
         )
     if not isinstance(geometry["regions"], list):
         raise ExtractionError(f"{source} geometry Boolean field 'regions' is not a list")
@@ -162,10 +156,7 @@ def _boolean_topology_signature(
 def _boolean_regions_match(expected: Any, actual: Any) -> bool:
     if not isinstance(expected, dict) or not isinstance(actual, dict):
         return False
-    if any(
-        expected.get(field) != actual.get(field)
-        for field in BOOLEAN_REGION_INTEGER_FIELDS
-    ):
+    if any(expected.get(field) != actual.get(field) for field in BOOLEAN_REGION_INTEGER_FIELDS):
         return False
     for field in BOOLEAN_REGION_FLOAT_FIELDS:
         expected_value = expected.get(field)
@@ -182,9 +173,7 @@ def _boolean_regions_match(expected: Any, actual: Any) -> bool:
     return True
 
 
-def _boolean_topology_mismatches(
-    expected: dict[str, Any], actual: dict[str, Any]
-) -> list[str]:
+def _boolean_topology_mismatches(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
     mismatches = []
     for field in BOOLEAN_TOPOLOGY_FIELDS:
         if expected.get(field) != actual.get(field):
@@ -198,9 +187,7 @@ def _boolean_topology_mismatches(
         mismatches.append("regions: missing or invalid region list")
         return mismatches
     if len(expected_regions) != len(actual_regions):
-        mismatches.append(
-            f"regions: expected {len(expected_regions)}, got {len(actual_regions)}"
-        )
+        mismatches.append(f"regions: expected {len(expected_regions)}, got {len(actual_regions)}")
         return mismatches
 
     unmatched_actual = list(actual_regions)
@@ -233,27 +220,25 @@ def _boolean_minimum_reference_mismatches(
         )
     for field in BOOLEAN_CONTAINER_FIELDS:
         if reference[field] != candidate[field]:
-            mismatches.append(
-                f"{field}: expected {reference[field]!r}, got {candidate[field]!r}"
-            )
+            mismatches.append(f"{field}: expected {reference[field]!r}, got {candidate[field]!r}")
     return mismatches
 
 
-def _boolean_failure_report(
-    failure_mode: str, message: str, evidence: list[str]
-) -> ScoringReport:
+def _boolean_failure_report(failure_mode: str, message: str, evidence: list[str]) -> ScoringReport:
     return ScoringReport(
         case_id="step+reference+candidate",
         overall_score=0.0,
         grade="invalid",
         subscores={"problem_setup": 0.0},
         pass_fail_flags={"setup_correct": False},
-        failure_modes_detected=[{
-            "code": failure_mode,
-            "severity": "critical",
-            "category": "problem_setup",
-            "evidence": message,
-        }],
+        failure_modes_detected=[
+            {
+                "code": failure_mode,
+                "severity": "critical",
+                "category": "problem_setup",
+                "evidence": message,
+            }
+        ],
         gates_triggered=[{"reason": failure_mode}],
         engineering_feedback=[f"[CRITICAL/problem_setup] {message}"],
         suggested_fixes=[
@@ -271,18 +256,14 @@ def _boolean_gate_report(
     candidate_geometry: dict[str, Any],
 ) -> ScoringReport | None:
     source_signature = _boolean_topology_signature(source_geometry, "source STEP")
-    reference_signature = _boolean_topology_signature(
-        reference_geometry, "reference FCStd"
-    )
+    reference_signature = _boolean_topology_signature(reference_geometry, "reference FCStd")
     if not _boolean_topology_mismatches(source_signature, reference_signature):
         raise ExtractionError(
             "need_boolean is true, but source STEP and reference FCStd Boolean "
             "topologies are indistinguishable"
         )
     try:
-        candidate_signature = _boolean_topology_signature(
-            candidate_geometry, "candidate FCStd"
-        )
+        candidate_signature = _boolean_topology_signature(candidate_geometry, "candidate FCStd")
     except ExtractionError as exc:
         return _boolean_failure_report(
             FailureMode.GEOMETRY_MISMATCH,
@@ -314,8 +295,8 @@ def _boolean_gate_report(
 
 STEP_WEIGHTS = {
     "accuracy_vs_reference": 0.35,
-    "mesh_budget": 0.25,            # candidate elements vs reference baseline (0 at >=130%)
-    "problem_setup": 0.15,          # incl. geometry fidelity + analysis/material/BC/load match
+    "mesh_budget": 0.25,  # candidate elements vs reference baseline (0 at >=130%)
+    "problem_setup": 0.15,  # incl. geometry fidelity + analysis/material/BC/load match
     "physical_validity": 0.15,
     "numerical_reliability": 0.05,
     "mesh_quality": 0.05,
@@ -323,69 +304,108 @@ STEP_WEIGHTS = {
 }
 
 
-def _reference_quantities(reference_sub: dict[str, Any], disp_tol: float, stress_tol: float) -> dict[str, Any]:
+def _reference_quantities(
+    reference_sub: dict[str, Any], disp_tol: float, stress_tol: float
+) -> dict[str, Any]:
     res = reference_sub.get("results", {})
     q: dict[str, Any] = {}
     if "max_displacement_mm" in res:
-        q["max_displacement_mm"] = {"value": res["max_displacement_mm"], "unit": "mm",
-                                    "tol_rel": disp_tol, "critical": True}
+        q["max_displacement_mm"] = {
+            "value": res["max_displacement_mm"],
+            "unit": "mm",
+            "tol_rel": disp_tol,
+            "critical": True,
+        }
     if "max_von_mises_MPa" in res:
-        q["max_von_mises_MPa"] = {"value": res["max_von_mises_MPa"], "unit": "MPa",
-                                  "tol_rel": stress_tol, "critical": False}
+        q["max_von_mises_MPa"] = {
+            "value": res["max_von_mises_MPa"],
+            "unit": "MPa",
+            "tol_rel": stress_tol,
+            "critical": False,
+        }
     if "max_shear_MPa" in res:
-        q["max_shear_MPa"] = {"value": res["max_shear_MPa"], "unit": "MPa",
-                              "tol_rel": stress_tol, "critical": False}
+        q["max_shear_MPa"] = {
+            "value": res["max_shear_MPa"],
+            "unit": "MPa",
+            "tol_rel": stress_tol,
+            "critical": False,
+        }
     freqs = res.get("natural_frequencies_Hz")
     if freqs:
-        q["first_natural_frequency_Hz"] = {"value": freqs[0], "unit": "Hz",
-                                           "tol_rel": disp_tol, "critical": True}
+        q["first_natural_frequency_Hz"] = {
+            "value": freqs[0],
+            "unit": "Hz",
+            "tol_rel": disp_tol,
+            "critical": True,
+        }
     return q
 
 
-def build_case(target_geom: dict[str, Any], reference_sub: dict[str, Any],
-               disp_tol: float = DISP_TOL, stress_tol: float = STRESS_TOL,
-               gross_tol: float = GROSS_TOL,
-               mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
-               case_id: str = "step+reference+candidate") -> CaseDefinition:
+def build_case(
+    target_geom: dict[str, Any],
+    reference_sub: dict[str, Any],
+    disp_tol: float = DISP_TOL,
+    stress_tol: float = STRESS_TOL,
+    gross_tol: float = GROSS_TOL,
+    mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
+    case_id: str = "step+reference+candidate",
+) -> CaseDefinition:
     """Build from target geometry and an engineer-generated reference.
 
     The reference element count is the mesh-budget baseline.
     """
-    geometry = {k: target_geom[k] for k in ("volume_mm3", "bbox_mm", "characteristic_length_mm")
-                if k in target_geom}
+    geometry = {
+        k: target_geom[k]
+        for k in ("volume_mm3", "bbox_mm", "characteristic_length_mm")
+        if k in target_geom
+    }
     mesh_exp: dict[str, Any] = {"expect_convergence": False}
     baseline = (reference_sub.get("mesh") or {}).get("num_elements")
     if baseline:
         mesh_exp["baseline_num_elements"] = baseline
         mesh_exp["budget_zero_ratio"] = mesh_budget_zero_ratio
     return CaseDefinition(
-        case_id=case_id, title="geometry + reference + candidate evaluation",
-        category="fem", subtype="",
+        case_id=case_id,
+        title="geometry + reference + candidate evaluation",
+        category="fem",
+        subtype="",
         analysis_type=reference_sub.get("analysis_type", "static"),
         units_expected={"length": "mm", "force": "N", "stress": "MPa"},
-        geometry=geometry, material=dict(reference_sub.get("material", {})),
+        geometry=geometry,
+        material=dict(reference_sub.get("material", {})),
         expected_bcs=reference_sub.get("boundary_conditions") or [{"type": "fixed"}],
         expected_loads=reference_sub.get("loads") or [],
-        reference={"method": "numerical", "source": "engineer-generated solved FCStd",
-                   "quantities": _reference_quantities(reference_sub, disp_tol, stress_tol),
-                   "gross_tol": gross_tol},
+        reference={
+            "method": "numerical",
+            "source": "engineer-generated solved FCStd",
+            "quantities": _reference_quantities(reference_sub, disp_tol, stress_tol),
+            "gross_tol": gross_tol,
+        },
         mesh_expectations=mesh_exp,
-        weights_override=dict(STEP_WEIGHTS), rubric={"requires_safety_factor": False})
+        weights_override=dict(STEP_WEIGHTS),
+        rubric={"requires_safety_factor": False},
+    )
 
 
-def score_trusted_payloads(target_geom: dict[str, Any], reference_sub: dict[str, Any],
-                          candidate_sub: dict[str, Any], disp_tol: float = DISP_TOL,
-                          stress_tol: float = STRESS_TOL, gross_tol: float = GROSS_TOL,
-                          mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
-                          geometry_source: str = "STEP") -> ScoringReport:
+def score_trusted_payloads(
+    target_geom: dict[str, Any],
+    reference_sub: dict[str, Any],
+    candidate_sub: dict[str, Any],
+    disp_tol: float = DISP_TOL,
+    stress_tol: float = STRESS_TOL,
+    gross_tol: float = GROSS_TOL,
+    mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
+    geometry_source: str = "STEP",
+) -> ScoringReport:
     """Score validator-generated extraction payloads without FreeCAD.
 
     This is a trusted low-level API. All three dictionaries must come directly
     from validator-controlled adapters or equivalent protected code. Never pass
     candidate-controlled JSON here; replay-verification fields are trusted.
     """
-    case = build_case(target_geom, reference_sub, disp_tol, stress_tol, gross_tol,
-                      mesh_budget_zero_ratio)
+    case = build_case(
+        target_geom, reference_sub, disp_tol, stress_tol, gross_tol, mesh_budget_zero_ratio
+    )
     sub = Submission.from_dict({**candidate_sub, "case_id": case.case_id})
     report = score_result(case, sub)
 
@@ -398,14 +418,18 @@ def score_trusted_payloads(target_geom: dict[str, Any], reference_sub: dict[str,
         report.evidence.insert(1, f"candidate_extraction_failure: {extraction_failure}")
     sv, fv = target_geom.get("volume_mm3"), sub.geometry.get("volume_mm3")
     if sv and fv:
-        report.evidence.insert(1, f"geometry_fidelity: target_volume={sv:.0f} mm^3, "
-                                  f"candidate_volume={fv:.0f} mm^3")
+        report.evidence.insert(
+            1, f"geometry_fidelity: target_volume={sv:.0f} mm^3, candidate_volume={fv:.0f} mm^3"
+        )
     base_n = (reference_sub.get("mesh") or {}).get("num_elements")
     cand_n = (candidate_sub.get("mesh") or {}).get("num_elements")
     if base_n and cand_n:
-        report.evidence.insert(2, f"mesh_budget: candidate={cand_n} elements vs reference baseline="
-                                  f"{base_n} ({cand_n/base_n*100:.0f}%; 0 at "
-                                  f"{mesh_budget_zero_ratio*100:.0f}%)")
+        report.evidence.insert(
+            2,
+            f"mesh_budget: candidate={cand_n} elements vs reference baseline="
+            f"{base_n} ({cand_n / base_n * 100:.0f}%; 0 at "
+            f"{mesh_budget_zero_ratio * 100:.0f}%)",
+        )
     return report
 
 
@@ -451,7 +475,8 @@ def _run_adapter(
 ) -> dict[str, Any]:
     if not os.path.exists(freecad_cmd):
         raise ExtractionError(
-            f"FreeCAD not found at {freecad_cmd!r}; set FREECAD_CMD to your FreeCAD 1.1 freecadcmd.")
+            f"FreeCAD not found at {freecad_cmd!r}; set FREECAD_CMD to your FreeCAD 1.1 freecadcmd."
+        )
     if timeout_seconds <= 0.0:
         raise ValueError("timeout_seconds must be positive")
     log_path = f"{out_path}.log"
@@ -482,8 +507,7 @@ def _run_adapter(
         if return_code != 0 or not os.path.exists(out_path):
             diagnostic = _diagnostic_tail(log_path)
             detail = diagnostic or "adapter produced no diagnostic output"
-            raise ExtractionError(
-                f"adapter failed with exit {return_code}: {detail}")
+            raise ExtractionError(f"adapter failed with exit {return_code}: {detail}")
         with open(out_path, encoding="utf-8") as fh:
             payload = json.load(fh)
     except ExtractionError:
@@ -534,9 +558,7 @@ def _runtime_preflight(
         raise RuntimeEnvironmentError(f"FEM runtime preflight failed: {exc}") from exc
     runtime = payload.get("runtime")
     if not isinstance(runtime, dict) or not runtime.get("calculix"):
-        raise RuntimeEnvironmentError(
-            "FEM runtime preflight produced no CalculiX version"
-        )
+        raise RuntimeEnvironmentError("FEM runtime preflight produced no CalculiX version")
     return runtime
 
 
@@ -568,13 +590,18 @@ def _score_step_fcstd(
     os.makedirs(extract_dir, exist_ok=True)
     tag = os.path.splitext(os.path.basename(fcstd_path_candidate))[0]
     step_geom = _extract(
-        fc, STEP_ADAPTER, step_path, os.path.join(extract_dir, f"{tag}_step.json"),
+        fc,
+        STEP_ADAPTER,
+        step_path,
+        os.path.join(extract_dir, f"{tag}_step.json"),
         timeout_seconds=timeout_seconds,
     )
     reference_geometry_payload = None
     if require_boolean:
         reference_geometry_payload = _extract(
-            fc, FCSTD_ADAPTER, fcstd_path_reference,
+            fc,
+            FCSTD_ADAPTER,
+            fcstd_path_reference,
             os.path.join(extract_dir, f"{tag}_boolean_reference.json"),
             extra_args=["geometry-only"],
             timeout_seconds=timeout_seconds,
@@ -582,7 +609,9 @@ def _score_step_fcstd(
     candidate_geometry_payload = None
     if require_preprocessing or require_boolean:
         candidate_geometry_payload = _extract(
-            fc, FCSTD_ADAPTER, fcstd_path_candidate,
+            fc,
+            FCSTD_ADAPTER,
+            fcstd_path_candidate,
             os.path.join(extract_dir, f"{tag}_required_geometry_candidate.json"),
             extra_args=["geometry-only"],
             timeout_seconds=timeout_seconds,
@@ -620,10 +649,14 @@ def _score_step_fcstd(
         reason = reference.get("extraction_error") or "no FEM result object found"
         raise ExtractionError(f"reference FCStd contains no loaded FEM result: {reason}")
     try:
-        candidate = _extract(fc, FCSTD_ADAPTER, fcstd_path_candidate,
-                             os.path.join(extract_dir, f"{tag}_candidate.json"),
-                             extra_args=["verify-solve"],
-                             timeout_seconds=timeout_seconds)
+        candidate = _extract(
+            fc,
+            FCSTD_ADAPTER,
+            fcstd_path_candidate,
+            os.path.join(extract_dir, f"{tag}_candidate.json"),
+            extra_args=["verify-solve"],
+            timeout_seconds=timeout_seconds,
+        )
     except ExtractionError as exc:
         candidate = _failed_candidate(str(exc))
     if candidate.get("no_result"):

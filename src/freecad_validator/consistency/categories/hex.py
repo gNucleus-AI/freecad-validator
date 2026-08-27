@@ -25,6 +25,7 @@ Trigger: any spec key contains one of the token groups `{hex}`,
 `{across, flats}`, or `{across, corners}`. `key` alone (as in spline
 specs' `key_*`) doesn't trigger since it has no hex semantic.
 """
+
 from __future__ import annotations
 
 import math
@@ -78,7 +79,8 @@ def _classify_key(key: str) -> str | None:
 
 
 def derived_candidates(
-    bank: MeasurementBank, spec: StructuredSpec,
+    bank: MeasurementBank,
+    spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Return ``{spec_key: (value, feature_ref)}`` for every hex-related
     spec param. AF comes from the bank's plane-pair offsets; ACF is
@@ -139,6 +141,8 @@ class HexCategory(Category):
     name = "hex"
 
     def derived_candidates(
-        self, bank: MeasurementBank, spec: StructuredSpec,
+        self,
+        bank: MeasurementBank,
+        spec: StructuredSpec,
     ) -> dict[str, tuple[float, str]]:
         return derived_candidates(bank, spec)
