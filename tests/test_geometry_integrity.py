@@ -91,6 +91,23 @@ def _save_sketch_pad_fillet(path) -> None:
         FreeCAD.closeDocument(doc.Name)
 
 
+def _save_direct_body_shape_with_shapeless_tip(path) -> None:
+    import FreeCAD  # type: ignore
+    import Part  # type: ignore
+
+    doc = FreeCAD.newDocument("integrity_shapeless_tip")
+    try:
+        body = doc.addObject("PartDesign::Body", "Body")
+        tip = body.newObject("PartDesign::Feature", "EmptyTip")
+        body.Tip = tip
+        body.Shape = Part.makeBox(10, 5, 3)
+        tip.purgeTouched()
+        body.purgeTouched()
+        doc.saveAs(str(path))
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+
+
 @pytest.mark.needs_freecad
 def test_featurepython_body_base_feature_is_forced_to_zero(tmp_path):
     reference = tmp_path / "reference.FCStd"
@@ -139,6 +156,19 @@ def test_generic_partdesign_feature_with_assigned_shape_is_forced_to_zero(tmp_pa
         doc.saveAs(str(candidate))
     finally:
         FreeCAD.closeDocument(doc.Name)
+
+    result = HeuristicGeometryScorer().score(str(reference), str(candidate))
+
+    assert result.score == 0.0
+    assert "non-PartDesign / baked geometry" in result.reason
+
+
+@pytest.mark.needs_freecad
+def test_direct_body_shape_with_shapeless_tip_is_forced_to_zero(tmp_path):
+    reference = tmp_path / "reference.FCStd"
+    candidate = tmp_path / "baked_shapeless_tip.FCStd"
+    _save_reference_box(reference)
+    _save_direct_body_shape_with_shapeless_tip(candidate)
 
     result = HeuristicGeometryScorer().score(str(reference), str(candidate))
 

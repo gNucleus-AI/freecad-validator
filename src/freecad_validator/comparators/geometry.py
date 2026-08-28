@@ -26,9 +26,9 @@ from pydantic import BaseModel, Field
 # actually tries to score a case.
 from .base import ComparisonResult, FCStdBaseComparator
 from .integrity_gates import (
-    _select_scored_body,
     partdesign_body_gate,
     partdesign_feature_tree_gate,
+    select_scored_body,
 )
 
 # --- Tolerances -----------------------------------------------------------
@@ -268,7 +268,7 @@ def _select_shape_and_features(fcstd_path: str) -> dict[str, Any] | None:
         gate_reason = partdesign_feature_tree_gate(doc)
         if gate_reason is not None:
             return {"_gate_reason": gate_reason}
-        selected_obj = _select_scored_body(doc)
+        selected_obj = select_scored_body(doc)
         if selected_obj is None:
             return None
         features = _shape_features(selected_obj.Shape.copy())

@@ -128,10 +128,12 @@ def _has_unbacked_body_shape(obj) -> bool:
     if tip is None:
         return True
     # A real PartDesign feature can have a null Shape after an operation fails
-    # while the Body keeps displaying its last valid shape.  That is an invalid
-    # feature, but it is not evidence that the Body contains baked geometry.
+    # while the Body keeps displaying its last valid shape. Accept that case
+    # only when another Body child still carries the visible geometry; otherwise
+    # a shape-less object assigned as Tip could hide a directly assigned Shape.
     if not _carries_faces(tip):
-        return False
+        children = list(getattr(obj, "OutList", []) or [])
+        return not any(_carries_faces(child) for child in children)
     return not _shapes_measure_match(
         getattr(obj, "Shape", None),
         getattr(tip, "Shape", None),
@@ -232,7 +234,7 @@ def _is_non_partdesign_geometry(obj, _seen: set | None = None) -> bool:
     return _carries_faces(obj)
 
 
-def _select_scored_body(doc):
+def select_scored_body(doc):
     """Return the first Body containing positive-volume geometry."""
     _, nonempty, _ = _classify_partdesign_bodies(doc)
     return nonempty[0] if nonempty else None
@@ -240,7 +242,7 @@ def _select_scored_body(doc):
 
 def partdesign_feature_tree_gate(doc) -> str | None:
     """Reject a scored Body built from baked or non-PartDesign geometry."""
-    body = _select_scored_body(doc)
+    body = select_scored_body(doc)
     if body is None:
         return None
     if _is_non_partdesign_geometry(body):
