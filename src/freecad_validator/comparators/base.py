@@ -17,8 +17,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .integrity_gates import partdesign_body_gate as partdesign_body_gate
-
 
 class ComparisonResult(BaseModel):
     """Result of comparing two FCStd files.
