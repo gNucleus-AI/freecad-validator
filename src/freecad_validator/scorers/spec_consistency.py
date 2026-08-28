@@ -51,7 +51,7 @@ def _failure_budget_score(
     if total_params <= 0:
         return 0.0
     denominator = min(total_params, failure_budget)
-    return round(max(0.0, 1.0 - failures / denominator), 4)
+    return max(0.0, 1.0 - failures / denominator)
 
 
 class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
@@ -186,8 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Score a candidate .FCStd against a spec .json using the "
-            "spec-consistency checker. The score is the fraction of "
-            "spec parameters the candidate's geometry agrees with."
+            "spec-consistency checker. Inconsistent and missing parameters "
+            "reduce the score under a configurable failure budget."
         ),
     )
     parser.add_argument("spec_json", type=Path, help="Path to <case>.json")

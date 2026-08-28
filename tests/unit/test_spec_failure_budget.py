@@ -42,6 +42,13 @@ def test_custom_failure_budget():
     assert _failure_budget_score(total_params=40, failures=20, failure_budget=20) == 0.0
 
 
+def test_large_failure_budget_does_not_round_a_failure_to_perfect():
+    score = _failure_budget_score(total_params=20_000, failures=1, failure_budget=20_000)
+
+    assert score == pytest.approx(1.0 - 1.0 / 20_000)
+    assert score < 1.0
+
+
 @pytest.mark.parametrize("failure_budget", [0, -1, 1.5, True, None])
 def test_invalid_failure_budget_is_rejected(failure_budget):
     with pytest.raises(ValueError, match="positive integer"):
