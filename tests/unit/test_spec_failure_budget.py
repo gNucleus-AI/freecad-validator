@@ -31,8 +31,9 @@ from freecad_validator.scorers.spec_consistency import (
         (20, 5, 0.75),
         (20, 10, 0.5),
         (100, 10, 0.9),
-        (2000, 10, 0.99),
-        (2000, 1000, 0.0),
+        (2000, 10, 0.995),
+        (2000, 1000, 0.5),
+        (3, 1, 0.6667),
     ],
 )
 def test_failure_budget_score(total_params, failures, expected):
@@ -51,7 +52,7 @@ def test_large_failure_budget_does_not_round_a_failure_to_perfect():
     assert score < 1.0
 
 
-@pytest.mark.parametrize("failure_budget", [0, -1, 1.5, True, None])
+@pytest.mark.parametrize("failure_budget", [0, -1, 1.5, True])
 def test_invalid_failure_budget_is_rejected(failure_budget):
     with pytest.raises(ValueError, match="positive integer"):
         HeuristicSpecConsistencyScorer(failure_budget=failure_budget)  # type: ignore[arg-type]
@@ -80,8 +81,31 @@ def test_scorer_counts_inconsistent_and_not_found_as_failures(tmp_path):
     assert result.score == 0.8
     assert result.details["failures"] == 3
     assert result.details["failure_denominator"] == 15
+    assert result.details["failure_budget"] is None
     assert result.details["raw_consistency_rate"] == 0.8
-    assert "failure_budget=1000" in result.reason
+    assert "failure_budget=disabled" in result.reason
+
+
+def test_scorer_applies_configured_failure_budget(tmp_path):
+    spec = tmp_path / "spec.json"
+    candidate = tmp_path / "candidate.FCStd"
+    spec.write_text("{}", encoding="utf-8")
+    candidate.write_bytes(b"")
+
+    report = ConsistencyReport(spec_name="test", fcstd_path=str(candidate))
+    report.consistent = [_finding(index) for index in range(12)]
+    report.inconsistent = [_finding(12), _finding(13)]
+    report.not_found = [_finding(14)]
+    report.summary = compute_summary(report)
+
+    scorer = HeuristicSpecConsistencyScorer(failure_budget=10)
+    scorer._checker = SimpleNamespace(check=lambda _spec, _candidate: report)
+    result = scorer.score(str(spec), str(candidate))
+
+    assert result.score == 0.7
+    assert result.details["failure_denominator"] == 10
+    assert result.details["failure_budget"] == 10
+    assert "failure_budget=10" in result.reason
 
 
 def test_validator_exposes_default_and_custom_failure_budget():

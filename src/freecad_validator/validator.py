@@ -94,7 +94,7 @@ class HeuristicValidator:
         *,
         geom_tolerances: GeometryTolerances | None = None,
         spec_tolerances: SpecTolerances | None = None,
-        spec_failure_budget: int = DEFAULT_FAILURE_BUDGET,
+        spec_failure_budget: int | None = DEFAULT_FAILURE_BUDGET,
         combine_method: CombineMethod = DEFAULT_COMBINE_METHOD,
     ):
         if combine_method not in COMBINE_METHODS:
@@ -113,7 +113,7 @@ class HeuristicValidator:
         return self._combine_method
 
     @property
-    def spec_failure_budget(self) -> int:
+    def spec_failure_budget(self) -> int | None:
         return self._spec_scorer.failure_budget
 
     def validate(
