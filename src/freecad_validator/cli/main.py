@@ -41,6 +41,7 @@ from freecad_validator.scorers.geometry import (
     tolerances_from_args,
 )
 from freecad_validator.scorers.spec_consistency import (
+    add_spec_scoring_arguments,
     add_spec_tolerance_arguments,
     spec_tolerances_from_args,
 )
@@ -70,6 +71,7 @@ def _add_validate_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("spec_json", help="path to the spec .json")
     add_tolerance_arguments(p)
     add_spec_tolerance_arguments(p)
+    add_spec_scoring_arguments(p)
     _add_combine_method_argument(p)
     p.add_argument(
         "--json", dest="emit_json", action="store_true", help="emit the result as JSON on stdout"
@@ -80,6 +82,7 @@ def _run_validate(args: argparse.Namespace) -> int:
     validator = Validator(
         geom_tolerances=tolerances_from_args(args),
         spec_tolerances=spec_tolerances_from_args(args),
+        spec_failure_budget=args.spec_failure_budget,
         combine_method=args.combine_method,
     )
     result = validator.validate(
@@ -124,6 +127,7 @@ def _add_batch_args(p: argparse.ArgumentParser) -> None:
     )
     add_tolerance_arguments(p)
     add_spec_tolerance_arguments(p)
+    add_spec_scoring_arguments(p)
     _add_combine_method_argument(p)
 
 
@@ -213,6 +217,7 @@ def _run_batch(args: argparse.Namespace) -> int:
     validator = Validator(
         geom_tolerances=tolerances_from_args(args),
         spec_tolerances=spec_tolerances_from_args(args),
+        spec_failure_budget=args.spec_failure_budget,
         combine_method=args.combine_method,
     )
     rows = []

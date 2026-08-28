@@ -43,7 +43,9 @@ from freecad_validator.scorers.geometry import (
     tolerances_from_args,
 )
 from freecad_validator.scorers.spec_consistency import (
+    DEFAULT_FAILURE_BUDGET,
     HeuristicSpecConsistencyScorer,
+    add_spec_scoring_arguments,
     add_spec_tolerance_arguments,
     spec_tolerances_from_args,
 )
@@ -92,6 +94,7 @@ class HeuristicValidator:
         *,
         geom_tolerances: GeometryTolerances | None = None,
         spec_tolerances: SpecTolerances | None = None,
+        spec_failure_budget: int | None = DEFAULT_FAILURE_BUDGET,
         combine_method: CombineMethod = DEFAULT_COMBINE_METHOD,
     ):
         if combine_method not in COMBINE_METHODS:
@@ -101,12 +104,17 @@ class HeuristicValidator:
         self._geometry_scorer = HeuristicGeometryScorer(tolerances=geom_tolerances)
         self._spec_scorer = HeuristicSpecConsistencyScorer(
             tolerances=spec_tolerances,
+            failure_budget=spec_failure_budget,
         )
         self._combine_method: CombineMethod = combine_method
 
     @property
     def combine_method(self) -> CombineMethod:
         return self._combine_method
+
+    @property
+    def spec_failure_budget(self) -> int | None:
+        return self._spec_scorer.failure_budget
 
     def validate(
         self,
@@ -147,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_tolerance_arguments(parser)
     add_spec_tolerance_arguments(parser)
+    add_spec_scoring_arguments(parser)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -154,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     validator = HeuristicValidator(
         geom_tolerances=tolerances_from_args(args),
         spec_tolerances=spec_tolerances_from_args(args),
+        spec_failure_budget=args.spec_failure_budget,
         combine_method=args.combine_method,
     )
     result = validator.validate(
