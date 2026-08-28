@@ -29,7 +29,7 @@ from freecad_validator.spec.parser import load_spec_json
 
 from .base import FCStdBaseScorer
 
-DEFAULT_FAILURE_BUDGET = 10
+DEFAULT_FAILURE_BUDGET = 1000
 
 
 def _validate_failure_budget(failure_budget: int) -> int:

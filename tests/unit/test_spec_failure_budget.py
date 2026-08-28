@@ -27,10 +27,12 @@ from freecad_validator.scorers.spec_consistency import (
         (4, 1, 0.75),
         (4, 4, 0.0),
         (10, 1, 0.9),
-        (20, 1, 0.9),
-        (20, 5, 0.5),
-        (20, 10, 0.0),
-        (100, 10, 0.0),
+        (20, 1, 0.95),
+        (20, 5, 0.75),
+        (20, 10, 0.5),
+        (100, 10, 0.9),
+        (2000, 10, 0.99),
+        (2000, 1000, 0.0),
     ],
 )
 def test_failure_budget_score(total_params, failures, expected):
@@ -38,8 +40,8 @@ def test_failure_budget_score(total_params, failures, expected):
 
 
 def test_custom_failure_budget():
-    assert _failure_budget_score(total_params=40, failures=10, failure_budget=20) == 0.5
-    assert _failure_budget_score(total_params=40, failures=20, failure_budget=20) == 0.0
+    assert _failure_budget_score(total_params=40, failures=5, failure_budget=10) == 0.5
+    assert _failure_budget_score(total_params=40, failures=10, failure_budget=10) == 0.0
 
 
 def test_large_failure_budget_does_not_round_a_failure_to_perfect():
@@ -75,11 +77,11 @@ def test_scorer_counts_inconsistent_and_not_found_as_failures(tmp_path):
     scorer._checker = SimpleNamespace(check=lambda _spec, _candidate: report)
     result = scorer.score(str(spec), str(candidate))
 
-    assert result.score == 0.7
+    assert result.score == 0.8
     assert result.details["failures"] == 3
-    assert result.details["failure_denominator"] == 10
+    assert result.details["failure_denominator"] == 15
     assert result.details["raw_consistency_rate"] == 0.8
-    assert "failure_budget=10" in result.reason
+    assert "failure_budget=1000" in result.reason
 
 
 def test_validator_exposes_default_and_custom_failure_budget():
