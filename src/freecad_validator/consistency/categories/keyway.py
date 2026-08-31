@@ -19,24 +19,19 @@ from the very common word "key").
 
 CAD measurement strategy:
 
-    width, depth       → closest `plane_pair.offset`  (slot-side and
-                                                       floor-to-surface gaps)
-    height, length     → closest axial length (Extrude.Length or
-                                                plane_pair.offset)
-    num_keyway, num_key→ closest cluster / circular-pattern count
+    width, depth       → the two side lengths of the unique rectangular
+                         keyway sketch profile
+    height, length     → Length of the Pad/Pocket that directly depends
+                         on that sketch
+    num_keyway, num_key→ pattern Occurrences, otherwise rectangle count
 
-This is opportunistic rather than rigorously correct (the generic
-closest-value matcher can still pick a wrong feature when multiple
-plane pairs have similar offsets), but it routes keyway keys to the
-**right candidate pool** — planes for width/depth, lengths for
-height — which the generic `kind` dispatcher can't distinguish.
+The expected numeric values are never used to select among measurements.
+Ambiguous profiles or feature links remain unverified.
 
 Uses token-based key classification like gear / spline categories.
 """
 
 from __future__ import annotations
-
-import math
 
 from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
@@ -85,153 +80,96 @@ def _classify_key(key: str) -> str | None:
     return None
 
 
-def _closest(candidates: list[tuple[float, str]], value: float) -> tuple[float, str] | None:
-    if not candidates:
+def _keyway_profile(bank: MeasurementBank):
+    """Return the one sketch profile that consists of slot rectangles."""
+    matches = []
+    for profile in bank.sketch_profiles:
+        count = len(profile.line_lengths)
+        unique = sorted({round(value, 6) for value in profile.line_lengths})
+        if count >= 4 and count % 4 == 0 and 1 <= len(unique) <= 2:
+            matches.append((profile, unique))
+    if len(matches) != 1:
         return None
-    return min(candidates, key=lambda c: abs(c[0] - value))
+    return matches[0]
+
+
+def _profile_feature_length(
+    bank: MeasurementBank, profile_name: str
+) -> tuple[float, str, str] | None:
+    """Read Length from the feature directly driven by the slot sketch."""
+    hits = []
+    for entry in bank.feature_tree:
+        if profile_name not in entry.dependencies or entry.type_id not in {
+            "PartDesign::Pad",
+            "PartDesign::Pocket",
+        }:
+            continue
+        if "Length" in entry.properties:
+            hits.append((float(entry.properties["Length"]), f"{entry.name}.Length", entry.name))
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
+def _pattern_count(bank: MeasurementBank, source_feature: str | None) -> tuple[float, str] | None:
+    if source_feature is None:
+        return None
+    hits = [
+        (float(entry.properties["Occurrences"]), f"{entry.name}.Occurrences")
+        for entry in bank.feature_tree
+        if "Pattern" in entry.type_id
+        and "Occurrences" in entry.properties
+        and source_feature in entry.dependencies
+    ]
+    if not hits:
+        return None
+    first = hits[0][0]
+    if any(value != first for value, _ in hits):
+        return None
+    return first, ",".join(ref for _, ref in hits)
 
 
 def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
-    """Return ``{spec_key: (value, feature_ref)}`` for every keyway-related
-    spec key, sourcing candidate values from the bank's plane-pair
-    offsets (widths/depths), feature-tree lengths, and cluster/pattern
-    counts. Returns empty if no spec key contains `keyway`.
-    """
+    """Derive keyway dimensions from the CAD slot profile and its feature."""
     if not _is_keyway_spec(spec):
         return {}
-
-    plane_pair_cands: list[tuple[float, str]] = [
-        (pp.offset, f"{pp.id}.offset") for pp in bank.plane_pairs
-    ]
-
-    # Keyway pockets are drawn as rectangles inside their pocket sketch;
-    # the rectangle's two side lengths are exactly (width, depth). When
-    # plane_pair detection collapses one of those sides — e.g. the
-    # depth face joins the shaft cylinder so isn't paired with another
-    # plane — we miss the value. Pull line lengths from `sketch_profiles`
-    # to cover that gap. Only sketches with ≥ 2 distinct line lengths
-    # are useful here (a single repeated length is a square or strip).
-    for sp in bank.sketch_profiles:
-        # Collapse near-duplicates so a 4-sided rectangle yields 2 entries.
-        unique: list[float] = []
-        for ln in sp.line_lengths:
-            if not unique or abs(ln - unique[-1]) / max(abs(ln), abs(unique[-1]), 1e-9) > 1e-3:
-                unique.append(ln)
-        if len(unique) < 2:
-            continue
-        for ln in unique:
-            plane_pair_cands.append((ln, f"{sp.name}.LineLength={ln:.3f}"))
-
-    # For axial length: feature-tree `Length` properties plus plane-pair
-    # offsets (an Extrude may carry the slot's axial length, but so can a
-    # plane-pair between the two slot end-caps).
-    length_cands: list[tuple[float, str]] = list(plane_pair_cands)
-    for entry in bank.feature_tree:
-        for prop in ("Length", "Length2", "Height", "Depth", "Width"):
-            if prop in entry.properties:
-                length_cands.append((entry.properties[prop], f"{entry.name}.{prop}"))
-
-    # Keyway depth derived from bore-chord geometry. A keyway cut into a
-    # circular bore is sketched as: one bore-arc CircleRadius (R) + a
-    # closed polyline forming the slot. For a single keyway the polyline
-    # contributes 3 lines (two side walls of length `s` + one floor of
-    # length `W`); two opposed keyways contribute 6 (the pattern doubled).
-    # The opening chord of length W sits on the bore at offset
-    # y0 = √(R² − (W/2)²) from the bore center; the floor sits at radius
-    # R + d. Each side wall spans y0 → R + d, so:
-    #     side_wall = (R + d) − y0     ⇒     d = side_wall + y0 − R
-    # `plane_pair` offsets won't carry `d` directly (the keyway floor
-    # plane usually fuses with the bore wall, killing the pair), so this
-    # is the canonical depth source whenever the bank exposes the slot
-    # sketch in this form.
-    depth_cands: list[tuple[float, str]] = list(plane_pair_cands)
-    for entry in bank.feature_tree:
-        bore_r: float | None = None
-        line_lens: list[float] = []
-        for k, v in entry.properties.items():
-            if "CircleRadius" in k and bore_r is None:
-                bore_r = float(v)
-            elif "LineLength" in k:
-                line_lens.append(float(v))
-        if bore_r is None or len(line_lens) < 3:
-            continue
-        unique = sorted({round(ln, 6) for ln in line_lens})
-        if len(unique) < 2:
-            continue
-        side = unique[0]
-        width = unique[-1]
-        half_w = width / 2.0
-        if half_w >= bore_r:
-            # Implausible: keyway opening wider than the bore diameter.
-            continue
-        y0 = math.sqrt(bore_r * bore_r - half_w * half_w)
-        depth = side + y0 - bore_r
-        if depth > 0:
-            depth_cands.append(
-                (
-                    depth,
-                    f"keyway.depth_from_bore({entry.name}: "
-                    f"R={bore_r:g}, W={width:g}, side={side:g})",
-                )
-            )
-
-    count_cands: list[tuple[float, str]] = [
-        (float(c.count), f"{c.id}.count") for c in bank.cylinder_clusters
-    ]
-    count_cands.extend((float(cp.count), f"{cp.id}.count") for cp in bank.circular_patterns)
-    # `Occurrences` on PartDesign pattern features is the direct count
-    # for e.g. 2 keyways made via PolarPattern. Circular-pattern
-    # detection requires N≥3 and cluster counts can't always tell how
-    # many slots the shaft has, so this is often the only source for
-    # num_keyway via pattern features.
-    for entry in bank.feature_tree:
-        if "Occurrences" in entry.properties:
-            count_cands.append(
-                (float(entry.properties["Occurrences"]), f"{entry.name}.Occurrences")
-            )
-    # Rectangular-slot count: a keyway typically appears in a sketch as
-    # a 4-sided rectangle. When multiple keyways share one sketch
-    # (generators often emit both keyways as siblings in sketch_1),
-    # line count / 4 gives the keyway count. Only emit when the sketch
-    # has line segments (not arcs/circles) — those won't form slot
-    # rectangles.
-    for entry in bank.feature_tree:
-        n_lines = sum(1 for k in entry.properties if "LineLength" in k)
-        if n_lines >= 4 and n_lines % 4 == 0 and n_lines <= 32:
-            # Cap at 32 (8 rectangles) — more would be noise from a
-            # non-keyway sketch (e.g. gear tooth profile polylines).
-            count_cands.append(
-                (
-                    float(n_lines // 4),
-                    f"{entry.name} rectangle count ({n_lines} lines ÷ 4)",
-                )
-            )
+    profile_hit = _keyway_profile(bank)
+    if profile_hit is None:
+        return {}
+    profile, dimensions = profile_hit
+    width = dimensions[-1]
+    depth = dimensions[0]
+    feature_length = _profile_feature_length(bank, profile.name)
+    length = feature_length[:2] if feature_length is not None else None
+    source_feature = feature_length[2] if feature_length is not None else None
+    count = _pattern_count(bank, source_feature) or (
+        float(len(profile.line_lengths) // 4),
+        f"{profile.name}.rectangle_count",
+    )
 
     out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
-        for spec_key, spec_val in source.items():
+        for spec_key in source:
             canonical = _classify_key(spec_key)
             if canonical is None:
                 continue
 
             if canonical == "width":
-                pool = plane_pair_cands
+                hit = (width, f"{profile.name}.rectangle_width")
             elif canonical == "depth":
-                pool = depth_cands
+                hit = (depth, f"{profile.name}.rectangle_depth")
             elif canonical == "length":
-                pool = length_cands
+                hit = length
             elif canonical == "count":
-                pool = count_cands
+                hit = count
             else:
                 continue
-
-            best = _closest(pool, float(spec_val))
-            if best is None:
+            if hit is None:
                 continue
-            val, feat = best
+            val, feat = hit
             out[spec_key] = (float(val), f"keyway.derived_from_cad({feat})")
     return out
 

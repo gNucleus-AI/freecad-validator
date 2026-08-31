@@ -60,77 +60,6 @@ _MIN_TEETH_FOR_GEAR = 10
 # radial offsets aren't scaled by cos β.
 _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
 
-# Token-based key classification — same rule set as `gear.py` plus the
-# helical-specific keys. Order is most-specific first so multi-token
-# combos win over single-token fallbacks.
-_CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
-    ("transverse_pressure_angle", frozenset({"transverse", "pressure", "angle"})),
-    ("transverse_module", frozenset({"transverse", "module"})),
-    ("normal_pressure_angle", frozenset({"normal", "pressure", "angle"})),
-    ("normal_module", frozenset({"normal", "module"})),
-    ("helix_angle", frozenset({"helix", "angle"})),
-    ("helix_hand", frozenset({"helix", "hand"})),
-    ("lead", frozenset({"lead"})),
-    ("diametral_pitch", frozenset({"diametral", "pitch"})),
-    ("circular_pitch", frozenset({"circular", "pitch"})),
-    ("pressure_angle", frozenset({"pressure", "angle"})),
-    ("outer_diameter", frozenset({"outer", "diameter"})),
-    ("root_diameter", frozenset({"root", "diameter"})),
-    ("base_diameter", frozenset({"base", "diameter"})),
-    ("pitch_diameter", frozenset({"pitch", "diameter"})),
-    ("tooth_thickness", frozenset({"teeth", "thickness"})),
-    ("whole_depth", frozenset({"whole", "depth"})),
-    ("module", frozenset({"module"})),
-    ("teeth", frozenset({"teeth"})),
-    ("addendum", frozenset({"addendum"})),
-    ("dedendum", frozenset({"dedendum"})),
-    ("clearance", frozenset({"clearance"})),
-)
-
-# Cede spline-prefixed keys to `SplineCategory` (some helical-gear cases
-# also carry an internal spline; we don't want both categories to claim
-# the spline keys).
-_SPLINE_EXCLUSIVE_TOKENS: frozenset[str] = frozenset({"spline"})
-
-
-def _tokens(key: str) -> frozenset[str]:
-    """Tokenize by `_`, normalizing `tooth` → `teeth` so either singular
-    or plural forms classify the same."""
-    return frozenset("teeth" if t == "tooth" else t for t in key.split("_"))
-
-
-def _classify_key(key: str) -> str | None:
-    """Map a spec key to a canonical helical-gear param via token presence.
-    Returns None for spline-exclusive keys or keys that match no rule."""
-    toks = _tokens(key)
-    if toks & _SPLINE_EXCLUSIVE_TOKENS:
-        return None
-    for canon, required in _CANONICAL_RULES:
-        if required.issubset(toks):
-            return canon
-    return None
-
-
-def _is_helical_spec(spec: StructuredSpec) -> bool:
-    """A spec is a helical-gear spec iff it declares ``helix_angle``.
-    No other heuristic is reliable — the presence of ``gear`` tokens
-    alone could equally be a spur gear."""
-    for source in (spec.scalars, spec.counts):
-        for key in source:
-            if _classify_key(key) == "helix_angle":
-                return True
-    return False
-
-
-def _find_spec_value(spec: StructuredSpec, canonical: str) -> tuple[str, float] | None:
-    """Search spec.scalars + spec.counts for a key that classifies as
-    ``canonical``. Returns (key, value) of first match or None."""
-    for source in (spec.scalars, spec.counts):
-        for key, value in source.items():
-            if _classify_key(key) == canonical:
-                return key, float(value)
-    return None
-
 
 def derive_params(
     module_n: float,
@@ -258,52 +187,6 @@ def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | Non
     }
 
 
-def _resolve_module(
-    spec: StructuredSpec,
-    teeth: int,
-    helix_angle_rad: float,
-    measured: dict[str, float] | None,
-) -> tuple[float | None, str | None]:
-    """Pick the most authoritative normal module ``m_n`` for the case.
-
-    Priority order (each step is the most direct derivation when the
-    inputs are present):
-
-      1. Spec declares ``module`` / ``normal_module``     → trust it.
-      2. Spec declares ``pitch_diameter``                  → m_n = pitch · cos(β) / z.
-      3. Spec declares ``outer_diameter``                  → m_n = outer / (z/cos β + 2).
-      4. Spec declares ``root_diameter``                   → m_n = root  / (z/cos β − 2.5).
-      5. Bank found a tooth ring (textbook 4.5·m fallback) → m_n from measured.
-
-    Returns ``(module_n, source_label)`` or ``(None, None)`` if no
-    derivation is possible.
-    """
-    module_match = _find_spec_value(spec, "module") or _find_spec_value(spec, "normal_module")
-    if module_match is not None:
-        return module_match[1], "spec"
-
-    cos_b = math.cos(helix_angle_rad)
-
-    pitch_match = _find_spec_value(spec, "pitch_diameter")
-    if pitch_match is not None:
-        return (pitch_match[1] * cos_b / teeth, "spec.pitch_diameter · cos β / teeth")
-
-    outer_match = _find_spec_value(spec, "outer_diameter")
-    if outer_match is not None:
-        return (outer_match[1] / (teeth / cos_b + 2.0), "spec.outer_diameter ÷ (z/cos β + 2)")
-
-    root_match = _find_spec_value(spec, "root_diameter")
-    if root_match is not None:
-        denom = teeth / cos_b - 2.5
-        if denom > 0:
-            return (root_match[1] / denom, "spec.root_diameter ÷ (z/cos β − 2.5)")
-
-    if measured is not None and measured.get("module", 0) > 0:
-        return measured["module"], "(outer_d − root_d) / 4.5 bank fallback"
-
-    return None, None
-
-
 def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
@@ -425,6 +308,15 @@ def _apply_helix_hand_check(
     measured_hand = _measure_helix_hand_from_fcstd(report.fcstd_path)
     if measured_hand is None:
         return
+
+    # The generic checker keeps string-valued params visible as not_found.
+    # Once this category has a real CAD-side handedness measurement, replace
+    # that placeholder instead of double-counting the same parameter.
+    report.not_found = [finding for finding in report.not_found if finding.param != "helix_hand"]
+    report.consistent = [finding for finding in report.consistent if finding.param != "helix_hand"]
+    report.inconsistent = [
+        finding for finding in report.inconsistent if finding.param != "helix_hand"
+    ]
 
     del tol_scalar  # exact string match; no tolerance
 

@@ -89,7 +89,12 @@ class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
                 return ComparisonResult(score=0.0, reason=f"{label} not found: {path}")
 
         spec = load_spec_json(reference)
-        report = self._checker.check(spec, candidate)
+        param_check_path = Path(reference).resolve().parent / "param_check.py"
+        report = self._checker.check(
+            spec,
+            candidate,
+            param_check_path=param_check_path,
+        )
 
         summary = report.summary
         if summary is None or summary.total_params == 0:
@@ -97,9 +102,9 @@ class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
                 score=0.0,
                 reason=(
                     f"{os.path.basename(reference)} vs {os.path.basename(candidate)}: "
-                    "no measurable spec params"
+                    f"no measurable spec params ({report.error or 'none parsed'})"
                 ),
-                details={"total_params": 0},
+                details={"total_params": 0, "error": report.error},
             )
 
         failures = summary.inconsistent + summary.not_found

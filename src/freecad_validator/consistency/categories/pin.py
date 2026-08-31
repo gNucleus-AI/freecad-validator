@@ -17,6 +17,8 @@ Geometric anchors:
 
 from __future__ import annotations
 
+import math
+
 from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
 from freecad_validator.spec.parser import StructuredSpec
@@ -53,7 +55,9 @@ def _classify(key: str) -> str | None:
         return "chamfer_length"
     if "rounded" in toks and ({"end", "tip"} & toks) and "height" in toks:
         return "rounded_end_height"
-    if {"chamfer", "slot", "rounded", "head"} & toks:
+    if "slot" in toks and "width" in toks:
+        return "slot_width"
+    if {"chamfer", "rounded", "head"} & toks:
         return None
     if "length" in toks:
         return "length"
@@ -191,28 +195,85 @@ def _principal_convex_cyl(bank: MeasurementBank):
     return max(convex, key=lambda c: c.radius * c.axial_extent)
 
 
-def _spec_value(spec: StructuredSpec, key: str) -> float | None:
-    """Return spec.scalars[key] (or counts[key]) as a float, or None."""
-    for source in (spec.scalars, spec.counts):
-        if key in source:
-            try:
-                return float(source[key])
-            except (TypeError, ValueError):
-                return None
-    return None
+def _declares_head_dimension(spec: StructuredSpec) -> bool:
+    """Return whether the spec distinguishes a head from the shaft.
 
-
-def _head_thickness(spec: StructuredSpec) -> float | None:
-    """Find a head_thickness-like spec value (head_thickness, head_height,
-    head_length). Returns the value in mm or None."""
+    The current bank has no reliable head-thickness measurement. In that
+    case the overall AABB must not be adjusted with an expected spec value
+    and presented as a CAD-derived shaft length.
+    """
     for source in (spec.scalars, spec.counts):
         for key in source:
             toks = _tokens(key)
             if "head" in toks and toks & {"thickness", "height", "length"}:
-                try:
-                    return float(source[key])
-                except (TypeError, ValueError):
+                return True
+    return False
+
+
+def _cad_head_thickness(bank: MeasurementBank) -> tuple[float, str] | None:
+    """Measure a revolved head from its sketch profile.
+
+    The longest profile segment establishes the revolution-axis direction.
+    Among parallel profile segments, the one farthest from that axis is the
+    outer head edge; its axial projection is the head thickness.
+    """
+    profile_by_name = {profile.name: profile for profile in bank.sketch_profiles}
+    for feature in bank.feature_tree:
+        if "Revolution" not in feature.type_id:
+            continue
+        for dependency in feature.dependencies:
+            profile = profile_by_name.get(dependency)
+            if profile is None or len(profile.line_segments) < 3:
+                continue
+            axis = max(profile.line_segments, key=lambda segment: segment.length)
+            axis_vec = tuple(axis.end[i] - axis.start[i] for i in range(3))
+            axis_len = math.sqrt(sum(value * value for value in axis_vec))
+            if axis_len <= 1e-9:
+                continue
+            direction = tuple(value / axis_len for value in axis_vec)
+            parallel: list[tuple[float, float]] = []  # (distance, axial projection)
+            for segment in profile.line_segments:
+                if segment.index == axis.index:
                     continue
+                delta = tuple(segment.end[i] - segment.start[i] for i in range(3))
+                delta_len = math.sqrt(sum(value * value for value in delta))
+                if delta_len <= 1e-9:
+                    continue
+                projection = abs(sum(delta[i] * direction[i] for i in range(3)))
+                if projection / delta_len < 0.995:
+                    continue
+                midpoint = tuple((segment.start[i] + segment.end[i]) / 2 for i in range(3))
+                from_axis = tuple(midpoint[i] - axis.start[i] for i in range(3))
+                axial_position = sum(from_axis[i] * direction[i] for i in range(3))
+                radial = tuple(from_axis[i] - axial_position * direction[i] for i in range(3))
+                distance = math.sqrt(sum(value * value for value in radial))
+                parallel.append((distance, projection))
+            if len(parallel) < 2:
+                continue
+            parallel.sort(key=lambda item: item[0], reverse=True)
+            head_distance, thickness = parallel[0]
+            next_distance = parallel[1][0]
+            if head_distance > 1.05 * next_distance and 1e-9 < thickness < 0.5 * axis_len:
+                return thickness, f"{profile.name}.outer_head_edge"
+    return None
+
+
+def _slot_width(bank: MeasurementBank) -> tuple[float, str] | None:
+    """Measure a rectangular slot from the sketch driving a Pocket."""
+    profiles = {profile.name: profile for profile in bank.sketch_profiles}
+    for feature in bank.feature_tree:
+        if feature.type_id != "PartDesign::Pocket":
+            continue
+        for dependency in feature.dependencies:
+            profile = profiles.get(dependency)
+            if profile is None or len(profile.line_segments) != 4:
+                continue
+            lengths = sorted(segment.length for segment in profile.line_segments)
+            if lengths[0] <= 0 or abs(lengths[0] - lengths[1]) / lengths[0] > 1e-3:
+                continue
+            if abs(lengths[2] - lengths[3]) / max(lengths[3], 1e-9) > 1e-3:
+                continue
+            return lengths[0], f"{profile.name}.rectangular_slot_short_side"
     return None
 
 
@@ -225,7 +286,8 @@ def derived_candidates(
     out: dict[str, tuple[float, str]] = {}
     aabb_max = _aabb_max(bank)
     main = _principal_convex_cyl(bank)
-    head_t = _head_thickness(spec)
+    has_head_dimension = _declares_head_dimension(spec)
+    head_thickness = _cad_head_thickness(bank) if has_head_dimension else None
     chamfer_axial = _chamfer_length_from_axial(bank)
     chamfer_sketch = _chamfer_length_from_sketch(bank)
     # Prefer axial-diff (more robust on coiled spring pins) when it
@@ -233,25 +295,29 @@ def derived_candidates(
     # the cylinder cluster has no axial step.
     chamfer_hit = chamfer_axial or chamfer_sketch
     rounded_hit = _rounded_end_height(bank)
+    slot_hit = _slot_width(bank)
     for source in (spec.scalars, spec.counts):
         for key, _ in source.items():
             kind = _classify(key)
             toks = _tokens(key)
-            if kind == "chamfer_length" and chamfer_hit is not None:
+            if kind == "slot_width" and slot_hit is not None:
+                out[key] = slot_hit
+            elif kind == "chamfer_length" and chamfer_hit is not None:
                 out[key] = chamfer_hit
             elif kind == "rounded_end_height" and rounded_hit is not None:
                 out[key] = rounded_hit
             elif kind == "length" and aabb_max is not None:
-                # Headed pin: spec's "pin_length" excludes the head — the bank
-                # measures the full part (shaft + head) as aabb_max, so
-                # subtract head_thickness when both are declared.
-                if "pin" in toks and head_t is not None:
-                    out[key] = (
-                        aabb_max - head_t,
-                        f"pin.aabb[max] − spec.head_thickness({head_t})",
-                    )
-                else:
-                    out[key] = (aabb_max, "pin.aabb[max]")
+                # For a headed pin, aabb_max is the overall part length while
+                # pin_length commonly means shaft-only length. Subtract only
+                # a head thickness recovered from the Revolution profile.
+                if "pin" in toks and has_head_dimension:
+                    if head_thickness is None:
+                        continue
+                    thickness, ref = head_thickness
+                    if 0 < thickness < aabb_max:
+                        out[key] = (aabb_max - thickness, f"pin.aabb[max] − {ref}")
+                    continue
+                out[key] = (aabb_max, "pin.aabb[max]")
             elif kind == "diameter" and main is not None:
                 out[key] = (2 * main.radius, f"pin.cylinder({main.id}.radius × 2)")
     return out

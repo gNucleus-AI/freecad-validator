@@ -38,9 +38,10 @@ pitch_diameter (a nominal value); the actually-measured outer_d /
 root_d are still correct.
 
 Category outputs never use the expected spec value as a measurement.
-Pressure angle and base diameter stay with the generic checker because
-the gear measurement bank does not currently expose a CAD-grounded
-pressure-angle measurement.
+For conventional involute sketches, the bank records B-spline flank
+endpoint radii. The smaller flank endpoint is the base circle, so the
+pressure angle is measured as ``acos(base / pitch)`` rather than guessed
+from an arbitrary pair of sketch lines.
 """
 
 from __future__ import annotations
@@ -71,8 +72,8 @@ _MIN_TEETH_FOR_GEAR = 10
 _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
 
 # Parameters whose complete dependency chain is grounded in the CAD
-# tooth-ring measurements. ``pressure_angle`` and ``base_diameter`` are
-# intentionally excluded: deriving either requires an unmeasured angle.
+# tooth-ring measurements, conventional involute flanks, and the first
+# two body-building Pads where applicable.
 _CAD_GROUNDED_OUTPUTS: frozenset[str] = frozenset(
     {
         "module",
@@ -86,6 +87,10 @@ _CAD_GROUNDED_OUTPUTS: frozenset[str] = frozenset(
         "outer_diameter",
         "root_diameter",
         "diametral_pitch",
+        "base_diameter",
+        "pressure_angle",
+        "face_width",
+        "hub_width",
     }
 )
 
@@ -96,6 +101,8 @@ _CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("diametral_pitch", frozenset({"diametral", "pitch"})),
     ("circular_pitch", frozenset({"circular", "pitch"})),
     ("pressure_angle", frozenset({"pressure", "angle"})),
+    ("face_width", frozenset({"face", "width"})),
+    ("hub_width", frozenset({"hub", "width"})),
     ("outer_diameter", frozenset({"outer", "diameter"})),
     ("root_diameter", frozenset({"root", "diameter"})),
     ("base_diameter", frozenset({"base", "diameter"})),
@@ -234,6 +241,55 @@ def derive_params(
     }
 
 
+def _sketch_gear_radii(bank: MeasurementBank) -> tuple[float, float, float] | None:
+    """Find exact outer/root/base radii from a conventional involute sketch.
+
+    A qualifying profile has two distinct circular radii and at least one
+    B-spline endpoint strictly between them. That endpoint is the base-circle
+    contact of an involute flank; it is direct CAD evidence for the base
+    diameter and pressure angle.
+    """
+    for profile in bank.sketch_profiles:
+        radii = sorted({round(float(radius), 6) for radius in profile.circle_radii})
+        if len(radii) < 2:
+            continue
+        root_radius, outer_radius = radii[0], radii[-1]
+        if outer_radius <= root_radius:
+            continue
+        base_candidates = [
+            float(radius)
+            for radius in profile.spline_endpoint_radii
+            if root_radius < float(radius) < outer_radius
+        ]
+        base_candidates.extend(
+            float(radius)
+            for radius in profile.involute_base_radii
+            if 0.0 < float(radius) < outer_radius
+        )
+        if base_candidates:
+            return outer_radius, root_radius, min(base_candidates)
+    return None
+
+
+def _pad_widths(bank: MeasurementBank) -> tuple[tuple[float, str], tuple[float, str]] | None:
+    """Return face and hub widths from the first two actual Pad features.
+
+    The supported spur-gear topology is tooth-profile Pad, hub Pad, then bore
+    Pocket. It is a structural selection, never a closest-value lookup.
+    """
+    pads = [
+        entry
+        for entry in bank.feature_tree
+        if entry.type_id == "PartDesign::Pad" and "Length" in entry.properties
+    ]
+    if len(pads) < 2:
+        return None
+    return (
+        (float(pads[0].properties["Length"]), f"{pads[0].name}.Length (tooth-profile Pad)"),
+        (float(pads[1].properties["Length"]), f"{pads[1].name}.Length (hub Pad)"),
+    )
+
+
 def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | None:
     """Detect the geometry-observable gear base triple:
     `(outer_diameter, root_diameter, teeth)` from the bank. Derive
@@ -273,8 +329,13 @@ def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | Non
     if len(teeth_match_radii) < 2:
         return None
 
-    tip_r = max(teeth_match_radii)
-    root_r = min(teeth_match_radii)
+    sketch_radii = _sketch_gear_radii(bank)
+    if sketch_radii is None:
+        tip_r = max(teeth_match_radii)
+        root_r = min(teeth_match_radii)
+        base_r = None
+    else:
+        tip_r, root_r, base_r = sketch_radii
     outer_d = 2 * tip_r
     root_d = 2 * root_r
     # Back out module from the CAD's tooth-depth assuming the common
@@ -288,12 +349,15 @@ def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | Non
     if module <= 0:
         return None
 
-    return {
+    result = {
         "outer_diameter": outer_d,
         "root_diameter": root_d,
         "module": module,
         "number_of_teeth": float(teeth),
     }
+    if base_r is not None:
+        result["base_diameter"] = 2 * base_r
+    return result
 
 
 def derived_candidates(
@@ -347,10 +411,15 @@ def derived_candidates(
         outer_d=outer_d,
         root_d=root_d,
     )
+    if "base_diameter" in measured:
+        base_diameter = float(measured["base_diameter"])
+        ratio = base_diameter / derived["pitch_diameter"]
+        if 0.0 < ratio < 1.0:
+            derived["base_diameter"] = base_diameter
+            derived["pressure_angle"] = math.acos(ratio)
     ref = (
         f"gear.derived_from_cad(outer_d={outer_d:.3f}, root_d={root_d:.3f}, "
-        f"z={teeth}, m={module:g} [{module_source}], "
-        "pressure_angle=unmeasured)"
+        f"z={teeth}, m={module:g} [{module_source}])"
     )
 
     out: dict[str, tuple[float, str]] = {}
@@ -363,7 +432,20 @@ def derived_candidates(
                 or canonical not in _CAD_GROUNDED_OUTPUTS
             ):
                 continue
+            if canonical in {"base_diameter", "pressure_angle"} and "base_diameter" not in measured:
+                continue
             out[spec_key] = (float(derived[canonical]), ref)
+
+    widths = _pad_widths(bank)
+    if widths is not None:
+        face_width, hub_width = widths
+        for source in (spec.scalars, spec.counts):
+            for spec_key in source:
+                canonical = _classify_key(spec_key)
+                if canonical == "face_width":
+                    out[spec_key] = face_width
+                elif canonical == "hub_width":
+                    out[spec_key] = hub_width
     return out
 
 

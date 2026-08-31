@@ -39,7 +39,7 @@ class SpecBaseParser(ABC):
     name: str = ""
 
     @abstractmethod
-    def parse_spec(self, spec: dict[str, str]) -> StructuredSpec:
+    def parse_spec(self, spec: dict[str, object]) -> StructuredSpec:
         """Parse ``spec`` (envelope: name, description, key_parameters) into
         a StructuredSpec. Missing envelope keys are treated as empty
         strings; subclasses must not raise on partial specs."""
