@@ -142,6 +142,27 @@ def test_vector_check_does_not_assume_every_sketch_has_world_origin_zero():
     assert finding.feature != "sketch.local_origin"
 
 
+def test_vector_origin_does_not_use_centroid_relative_coordinates():
+    bank = MeasurementBank(
+        globals={
+            "centroid": _corner("centroid", (10.0, 20.0, 30.0)),
+            "aabb_min_corner": _corner("min", (10.0, 20.0, 30.0)),
+        },
+        cylinder_clusters=[_cluster("centered_cylinder", 5.0)],
+    )
+
+    bucket, finding = VectorCheck().run(
+        "part_origin",
+        (0.0, 0.0, 0.0),
+        bank,
+        tol_scalar=0.01,
+        tol_pos=0.01,
+    )
+
+    assert bucket == "inconsistent"
+    assert "centroid" not in (finding.feature or "")
+
+
 def test_vector_check_reports_unsupported_dimensions_without_crashing():
     bank = MeasurementBank(globals={"aabb_min_corner": _corner("min", (1.0, 2.0, 3.0))})
 

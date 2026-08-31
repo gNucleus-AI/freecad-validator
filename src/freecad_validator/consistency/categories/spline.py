@@ -50,6 +50,11 @@ def _tokens(key: str) -> frozenset[str]:
     return frozenset(key.split("_"))
 
 
+def _is_spline_spec(spec: StructuredSpec) -> bool:
+    """Require an explicit spline key before refining peer parameters."""
+    return any("spline" in _tokens(key) for source in (spec.scalars, spec.counts) for key in source)
+
+
 def derive_params(
     module: float,
     teeth: int,
@@ -95,6 +100,9 @@ def derived_candidates(
     spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
     """Derive module and pitch diameter from an equal-count tooth ring."""
+    if not _is_spline_spec(spec):
+        return {}
+
     tooth_groups: dict[int, list[float]] = {}
     for cluster in bank.cylinder_clusters:
         if cluster.count < 6:
@@ -121,6 +129,11 @@ def derived_candidates(
     for source in (spec.scalars, spec.counts):
         for key in source:
             tokens = _tokens(key)
+            # A mixed specification can contain both a spline and a gear.
+            # Gear dimensions use a different whole-depth relation, so they
+            # must be left to GearCategory even when the spline trigger is on.
+            if "gear" in tokens:
+                continue
             if "module" in tokens:
                 out[key] = (module, ref)
             elif "pitch" in tokens and "diameter" in tokens:

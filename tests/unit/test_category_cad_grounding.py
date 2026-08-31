@@ -130,6 +130,19 @@ def test_spline_tooth_ring_derivation_comes_only_from_cad():
     assert candidates["spline_pitch_diameter"][0] == 36.0
 
 
+def test_spline_tooth_ring_does_not_claim_gear_or_non_spline_keys():
+    bank = _tooth_ring_bank()
+    gear_only = _spec("spur_gear", "gear_module = 1 mm\ngear_pitch_diameter = 20 mm")
+    mixed = _spec(
+        "gear_with_spline",
+        "spline_module = 2 mm\nspline_pitch_diameter = 40 mm\n"
+        "gear_module = 1 mm\ngear_pitch_diameter = 20 mm",
+    )
+
+    assert spline_candidates(bank, gear_only) == {}
+    assert set(spline_candidates(bank, mixed)) == {"spline_module", "spline_pitch_diameter"}
+
+
 def test_involute_gear_pressure_angle_uses_measured_base_radius():
     bank = _tooth_ring_bank()
     bank.sketch_profiles = [

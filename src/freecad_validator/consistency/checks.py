@@ -778,6 +778,10 @@ class VectorCheck(ParamCheck):
                 m = bank.globals.get(k)
                 if m is not None and isinstance(m.value, tuple):
                     out.append((tuple(m.value), f"globals.{k}"))
+            # ``corner`` and ``origin`` are absolute model-frame claims.
+            # Neither a sketch/grid-local origin nor a centroid-relative
+            # location is evidence for them.
+            return out
         # Tier 1: grid origins (local sketch frame — no shift).
         for g in bank.grids:
             out.append((tuple(g.origin), f"{g.id}.origin"))
