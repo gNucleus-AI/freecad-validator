@@ -36,3 +36,5 @@ _build/
 *.FCStd[0-9]
 *.FCStd.bak
 *.FCBak
+test-data/
+opensource-v2-design.md

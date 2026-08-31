@@ -14,8 +14,10 @@ import math
 LENGTH_DECIMALS = 9
 ANGLE_DECIMALS = 10
 
-# Property names on FreeCAD objects whose scalar values are angles (radians
-# internally). `round_property` uses this set to switch precision.
+# Property names on FreeCAD objects whose scalar values are angles. FreeCAD
+# exposes App::PropertyAngle Quantity.Value in degrees; the feature-tree
+# extractor converts those values to radians before calling `round_property`.
+# `round_property` only selects the appropriate precision.
 ANGLE_PROP_NAMES = frozenset({"Angle", "Angle1", "Angle2", "TaperAngle", "TaperAngle2"})
 
 

@@ -65,52 +65,11 @@ def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
+    """Leave unmeasurable rib/profile values with the generic report."""
+    del bank
     if not _is_pipe_elbow_spec(spec):
         return {}
-
-    out: dict[str, tuple[float, str]] = {}
-    for spec_key, spec_val in spec.scalars.items():
-        toks = _tokens(spec_key)
-        try:
-            spec_val_f = float(spec_val)
-        except (TypeError, ValueError):
-            continue
-
-        # ---- rib_anchor_offset_value (mm) ----
-        if "rib" in toks and "anchor" in toks and "offset" in toks:
-            out[spec_key] = (
-                spec_val_f,
-                "pipe_elbow.trust_spec(rib_anchor_offset — sketch endpoint not in bank)",
-            )
-            continue
-
-        # ---- rib_profile_span (mm) ----
-        if "rib" in toks and "profile" in toks and "span" in toks:
-            out[spec_key] = (
-                spec_val_f,
-                "pipe_elbow.trust_spec(rib_profile_span — sketch extent not in bank)",
-            )
-            continue
-
-        # ---- rib_left_vertical_height (mm) ----
-        if "rib" in toks and "vertical" in toks and "height" in toks:
-            out[spec_key] = (
-                spec_val_f,
-                "pipe_elbow.trust_spec(rib_left_vertical_height — pentagon edge length)",
-            )
-            continue
-
-        # ---- flange_radial_width (mm) ----
-        # The "width" token routes through DiameterCheck-style fallback
-        # and lands on flange_thickness; claim it explicitly here.
-        if "flange" in toks and "radial" in toks and "width" in toks:
-            out[spec_key] = (
-                spec_val_f,
-                "pipe_elbow.trust_spec(flange_radial_width — annulus radial extent)",
-            )
-            continue
-
-    return out
+    return {}
 
 
 class PipeElbowCategory(Category):

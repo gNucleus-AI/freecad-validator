@@ -21,7 +21,7 @@ Both return 0 when either component is 0, preserving each scorer's
 zero-gate behavior.
 
 Spec-consistency reads an optional case-local ``param_check.py``
-sitting next to the candidate FCStd; without one, only the generic
+sitting next to the spec JSON; without one, only the generic
 per-kind checks run.
 """
 
