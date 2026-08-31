@@ -16,16 +16,19 @@ The generic checker tends to anchor on `Extrude.Length` or
 means by "length" or "height" for a key (those are sketch-side
 dimensions). This category re-anchors:
 
-    length / body_length     → closest sketch LineLength to the spec value
     height_with_head         → aabb's mid axis (head width across the part)
     moon_height              → aabb's mid axis (semi-circular profile height)
-    width                    → Extrude.Length (matches generic; harmless echo)
+
+Body length is measured from the profile sketch driving the Pad when that
+sketch has a unique long, axis-parallel body edge.
 
 Trigger: ``spec.name`` contains the token ``key`` but NOT ``keyway``
 (``keyway`` parts are handled by KeywayCategory).
 """
 
 from __future__ import annotations
+
+import math
 
 from freecad_validator.consistency.categories.base import Category
 from freecad_validator.measurement.schema import MeasurementBank
@@ -51,16 +54,41 @@ def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     return tuple(sorted(float(x) for x in g.value))  # type: ignore[return-value]
 
 
-def _sketch_line_lengths(bank: MeasurementBank) -> list[tuple[float, str]]:
-    """Return [(line_length, feature_ref), ...] from every sketch."""
-    out = []
-    for ft in bank.feature_tree:
-        if ft.type_id != "Sketcher::SketchObject":
+def _profile_body_length(bank: MeasurementBank) -> tuple[float, str] | None:
+    """Measure the main body edge in a Pad-driving key profile."""
+    profile_by_name = {profile.name: profile for profile in bank.sketch_profiles}
+    hits: list[tuple[float, str]] = []
+    for feature in bank.feature_tree:
+        if feature.type_id != "PartDesign::Pad":
             continue
-        for prop, val in ft.properties.items():
-            if "LineLength" in prop and isinstance(val, (int, float)):
-                out.append((float(val), f"{ft.name}.{prop}"))
-    return out
+        for dependency in feature.dependencies:
+            profile = profile_by_name.get(dependency)
+            if profile is None or len(profile.line_segments) < 3:
+                continue
+            if len({round(segment.length, 6) for segment in profile.line_segments}) < 2:
+                continue
+            axis = max(profile.line_segments, key=lambda segment: segment.length)
+            axis_vec = tuple(axis.end[i] - axis.start[i] for i in range(3))
+            axis_len = math.sqrt(sum(value * value for value in axis_vec))
+            if axis_len <= 1e-9:
+                continue
+            direction = tuple(value / axis_len for value in axis_vec)
+            candidates: list[float] = []
+            for segment in profile.line_segments:
+                if segment.index == axis.index:
+                    continue
+                delta = tuple(segment.end[i] - segment.start[i] for i in range(3))
+                projection = abs(sum(delta[i] * direction[i] for i in range(3)))
+                if projection / max(segment.length, 1e-9) >= 0.99:
+                    candidates.append(projection)
+            if candidates:
+                hits.append((max(candidates), f"{profile.name}.axis_parallel_body_edge"))
+    if not hits:
+        return None
+    first = hits[0][0]
+    if any(abs(value - first) / max(value, first, 1e-9) > 1e-3 for value, _ in hits):
+        return None
+    return hits[0]
 
 
 def _classify(key: str) -> str | None:
@@ -71,8 +99,6 @@ def _classify(key: str) -> str | None:
         return "height_with_head"
     if "length" in toks:
         return "length"
-    if "thickness" in toks:
-        return "thickness"
     return None
 
 
@@ -84,24 +110,16 @@ def derived_candidates(
         return {}
     out: dict[str, tuple[float, str]] = {}
     aabb = _aabb_sorted(bank)
-    line_lengths = _sketch_line_lengths(bank)
+    body_length = _profile_body_length(bank)
 
     for source in (spec.scalars, spec.counts):
-        for key, spec_val in source.items():
-            try:
-                spec_v = float(spec_val)
-            except (TypeError, ValueError):
-                continue
+        for key in source:
             kind = _classify(key)
             if kind is None:
                 continue
 
-            if kind == "length" and line_lengths:
-                # Pick the sketch line whose length is closest to the spec —
-                # disambiguates body length (e.g. 14) from total length (18)
-                # in compound profiles like gib-head keys.
-                best_val, best_ref = min(line_lengths, key=lambda lr: abs(lr[0] - spec_v))
-                out[key] = (best_val, f"key.sketch({best_ref})")
+            if kind == "length" and body_length is not None:
+                out[key] = body_length
 
             elif kind == "moon_height" and aabb is not None:
                 # Half-moon key: the chord-to-arc-tip rise is the aabb's

@@ -40,7 +40,11 @@ def _is_washer_spec(spec: StructuredSpec) -> bool:
     if "washer" not in name_toks:
         return False
     if name_toks & {"square", "rectangular"}:
-        return False
+        return any(
+            {"square", "neck", "hole", "width"}.issubset(_tokens(key))
+            for source in (spec.scalars, spec.counts)
+            for key in source
+        )
     return True
 
 
@@ -63,6 +67,8 @@ def _outer_inner_radii(bank: MeasurementBank):
 
 def _classify(key: str) -> str | None:
     toks = _tokens(key)
+    if {"square", "neck", "hole", "width"}.issubset(toks):
+        return "square_neck_hole_width"
     if "wall" in toks and "thickness" in toks:
         return "wall_thickness"
     if "thickness" in toks:
@@ -78,6 +84,22 @@ def _classify(key: str) -> str | None:
     return None
 
 
+def _square_neck_hole_width(bank: MeasurementBank) -> tuple[float, str] | None:
+    profiles = {profile.name: profile for profile in bank.sketch_profiles}
+    for feature in bank.feature_tree:
+        if feature.type_id != "PartDesign::Pocket":
+            continue
+        for dependency in feature.dependencies:
+            profile = profiles.get(dependency)
+            if profile is None or len(profile.line_segments) != 4:
+                continue
+            lengths = [segment.length for segment in profile.line_segments]
+            side = sum(lengths) / 4
+            if side > 0 and all(abs(length - side) / side <= 1e-3 for length in lengths):
+                return side, f"{profile.name}.square_neck_profile_side"
+    return None
+
+
 def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
@@ -87,6 +109,7 @@ def derived_candidates(
     out: dict[str, tuple[float, str]] = {}
     aabb = _aabb_sorted(bank)
     outer, inner = _outer_inner_radii(bank)
+    square_neck = _square_neck_hole_width(bank)
 
     for source in (spec.scalars, spec.counts):
         for key, _ in source.items():
@@ -98,6 +121,8 @@ def derived_candidates(
                     outer.radius - inner.radius,
                     f"washer.width({outer.id}.r − {inner.id}.r)",
                 )
+            elif kind == "square_neck_hole_width" and square_neck is not None:
+                out[key] = square_neck
             elif kind == "thickness" and aabb is not None:
                 out[key] = (aabb[0], "washer.aabb[min]")
             elif kind == "outer_diameter" and outer is not None:

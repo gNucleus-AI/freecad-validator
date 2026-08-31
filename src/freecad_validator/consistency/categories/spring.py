@@ -1,13 +1,9 @@
 """Spring category — helical compression springs, disc springs, spring
 pins, spring washers.
 
-Helix angle is supplemented from sketch line angles when present.
-A helical spring's pitch sketch encodes one turn as a right triangle
-on the unrolled cylinder; the spec's `helix_angle` is the angle from
-the cylinder axis, while FreeCAD typically records the angle of the
-inclined line from the radial sketch axis — those two are
-complementary (sum to π/2). The category accepts either reading and
-picks whichever is closer to the spec value.
+Helix angle is intentionally not supplemented from arbitrary sketch
+line angles: the current bank cannot identify the helix-driving line
+without consulting the expected value.
 
 Heterogeneous family — each subtype has different bank signatures:
 
@@ -141,32 +137,6 @@ def _disc_cone_height(bank: MeasurementBank) -> tuple[float, str] | None:
     return cone_height, f"spring.disc(aabb[min] − edge_cone.axial_extent={thickness:.3f})"
 
 
-def _helix_angle_from_sketches(
-    bank: MeasurementBank, target_rad: float
-) -> tuple[float, str] | None:
-    """Sweep all sketch line angles and constraint angles. For each
-    candidate angle ``a``, also consider its complement ``π/2 − a`` —
-    the helix's inclined line is between two complementary
-    conventions. Return whichever value is closest to `target_rad`.
-    """
-    best: tuple[float, float, str] | None = None  # (err, value, ref)
-    for sp in bank.sketch_profiles:
-        for source_name, src in (
-            ("LineAngle", sp.line_angles),
-            ("ConstraintAngle", sp.constraint_angles),
-        ):
-            for a in src:
-                for variant in (a, math.pi / 2 - a):
-                    if variant <= 0 or variant >= math.pi / 2 + 1e-6:
-                        continue
-                    err = abs(variant - target_rad)
-                    if best is None or err < best[0]:
-                        best = (err, variant, f"{sp.name}.{source_name}")
-    if best is None:
-        return None
-    return best[1], best[2]
-
-
 def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     g = bank.globals.get("aabb_sorted")
     if g is None or not isinstance(g.value, tuple) or len(g.value) != 3:
@@ -201,19 +171,12 @@ def derived_candidates(
     # ratio to disambiguate.
     is_flat = aabb is not None and aabb[2] > 4.0 * aabb[0]
     for source in (spec.scalars, spec.counts):
-        for key, val in source.items():
+        for key in source:
             kind = _classify(key)
             if kind is None:
                 continue
 
             if kind == "helix_angle":
-                try:
-                    target = float(val)  # parser stores angles in radians
-                except (TypeError, ValueError):
-                    continue
-                hit = _helix_angle_from_sketches(bank, target)
-                if hit is not None:
-                    out[key] = (hit[0], f"spring.helix({hit[1]})")
                 continue
 
             if kind == "cone_height":

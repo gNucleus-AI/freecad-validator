@@ -16,8 +16,8 @@ Regular-hex geometry relations used for derivation:
     half_angle     = 30°                              (axis→flat vs axis→corner)
 
 Candidates sourced from the bank:
-    across_flats      → closest `plane_pair.offset`  (the two parallel
-                        flats are 3 antiparallel pairs at the same AF)
+    across_flats      → repeated `plane_pair.offset` group (multiple
+                        non-parallel pairs at the same AF)
     across_corners    → derived from the AF plane_pair × 2/√3
     angle / half_angle→ geometric constant (30°)
 
@@ -54,6 +54,9 @@ def _tokens(key: str) -> frozenset[str]:
 
 
 def _is_hex_spec(spec: StructuredSpec) -> bool:
+    name_tokens = set((spec.name or "").lower().replace("-", " ").replace("_", " ").split())
+    if "hex" in name_tokens:
+        return True
     for source in (spec.scalars, spec.counts):
         for key in source:
             toks = _tokens(key)
@@ -75,7 +78,82 @@ def _classify_key(key: str) -> str | None:
     # (`hex_head_angle`, `hex_nut_half_angle`); treat them alike.
     if "hex" in toks and "angle" in toks:
         return "half_angle"
+    if {"hub", "width"}.issubset(toks):
+        return "across_flats"
     return None
+
+
+def _regular_hex_across_flats(bank: MeasurementBank) -> tuple[float, str] | None:
+    """Find a CAD-confirmed regular-hex across-flats measurement.
+
+    A hex prism exposes parallel face pairs in multiple in-plane normal
+    directions, all with the same offset. The detector may collapse one of
+    the three directions, so two non-parallel pairs are sufficient. A single
+    plane-pair (for example a plate thickness) is not a hex signature.
+    """
+    groups: list[list] = []
+    for pair in sorted(bank.plane_pairs, key=lambda item: item.offset):
+        for group in groups:
+            anchor = group[0].offset
+            if abs(pair.offset - anchor) / max(abs(pair.offset), abs(anchor), 1e-9) <= 1e-3:
+                group.append(pair)
+                break
+        else:
+            groups.append([pair])
+
+    matches: list[list] = []
+    for group in groups:
+        if len(group) < 2:
+            continue
+        has_hex_normals = any(
+            abs(abs(sum(a * b for a, b in zip(left.normal, right.normal, strict=True))) - 0.5)
+            <= 0.05
+            for i, left in enumerate(group)
+            for right in group[i + 1 :]
+        )
+        if has_hex_normals:
+            matches.append(group)
+
+    if len(matches) > 1:
+        return None
+    plane_across_flats = (
+        float(sum(pair.offset for pair in matches[0]) / len(matches[0])) if matches else None
+    )
+
+    profile_hits: list[tuple[float, str]] = []
+    for profile in bank.sketch_profiles:
+        segments = profile.line_segments
+        if len(segments) != 6:
+            continue
+        lengths = [segment.length for segment in segments]
+        side = sum(lengths) / len(lengths)
+        if any(abs(length - side) / max(abs(length), abs(side), 1e-9) > 1e-3 for length in lengths):
+            continue
+        vertex_degree: dict[tuple[float, float, float], int] = {}
+        for segment in segments:
+            for point in (segment.start, segment.end):
+                vertex = tuple(round(value, 6) for value in point)
+                vertex_degree[vertex] = vertex_degree.get(vertex, 0) + 1
+        if len(vertex_degree) != 6 or any(degree != 2 for degree in vertex_degree.values()):
+            continue
+        profile_hits.append((side * math.sqrt(3.0), profile.name))
+
+    if plane_across_flats is None:
+        if len(profile_hits) != 1:
+            return None
+        across_flats, profile_name = profile_hits[0]
+        return across_flats, f"{profile_name}.closed_regular_hex(AF)"
+
+    matching_profiles = [
+        (value, name)
+        for value, name in profile_hits
+        if abs(value - plane_across_flats) / max(abs(value), abs(plane_across_flats), 1e-9) <= 1e-3
+    ]
+    if not matching_profiles:
+        return None
+    refs = ",".join([*(pair.id for pair in matches[0]), *(name for _, name in matching_profiles)])
+    across_flats = plane_across_flats
+    return across_flats, refs
 
 
 def derived_candidates(
@@ -90,44 +168,37 @@ def derived_candidates(
     if not _is_hex_spec(spec):
         return {}
 
-    plane_pair_cands: list[tuple[float, str]] = [
-        (pp.offset, f"{pp.id}.offset") for pp in bank.plane_pairs
-    ]
+    hex_af = _regular_hex_across_flats(bank)
+    if hex_af is None:
+        return {}
+    across_flats, plane_refs = hex_af
 
     out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
-        for spec_key, spec_val in source.items():
+        for spec_key in source:
             canonical = _classify_key(spec_key)
             if canonical is None:
                 continue
 
             if canonical == "across_flats":
-                if not plane_pair_cands:
-                    continue
-                # Closest plane_pair.offset to the spec-declared AF.
-                best = min(plane_pair_cands, key=lambda c: abs(c[0] - float(spec_val)))
                 out[spec_key] = (
-                    float(best[0]),
-                    f"hex.derived_from_cad({best[1]}, AF)",
+                    across_flats,
+                    f"hex.regular_profile({plane_refs}, AF)",
                 )
 
             elif canonical == "across_corners":
-                if not plane_pair_cands:
-                    continue
-                # Find the plane_pair.offset that best fits AF = ACF × cos(30°).
-                af_expected = float(spec_val) * math.cos(math.radians(30.0))
-                best = min(plane_pair_cands, key=lambda c: abs(c[0] - af_expected))
-                acf_derived = best[0] * _ACROSS_CORNERS_FACTOR
+                acf_derived = across_flats * _ACROSS_CORNERS_FACTOR
                 out[spec_key] = (
                     float(acf_derived),
-                    f"hex.derived_from_cad({best[1]} × 2/√3, ACF)",
+                    f"hex.regular_profile({plane_refs}, AF × 2/√3)",
                 )
 
             elif canonical == "half_angle":
-                # Regular-hex geometric constant — not measured.
+                # The constant is valid only after the candidate CAD has
+                # supplied a regular-hex face-pair signature.
                 out[spec_key] = (
                     _HEX_HALF_ANGLE_RAD,
-                    "hex.geom (half_angle = 30°)",
+                    f"hex.regular_profile({plane_refs}, half_angle = 30°)",
                 )
     return out
 

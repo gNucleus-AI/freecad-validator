@@ -47,6 +47,7 @@ class FeatureTreeEntry(BaseModel):
     label: str  # user-visible Label
     properties: dict[str, float] = Field(default_factory=dict)
     vectors: dict[str, tuple[float, float, float]] = Field(default_factory=dict)
+    dependencies: list[str] = Field(default_factory=list)
 
 
 class GridSummary(BaseModel):
@@ -102,6 +103,15 @@ class ConicSurface(BaseModel):
     axial_extent: float  # axial distance between the two ends
 
 
+class SketchLineSegment(BaseModel):
+    """One non-construction sketch line in the sketch-local frame."""
+
+    index: int
+    start: tuple[float, float, float]
+    end: tuple[float, float, float]
+    length: float
+
+
 class SketchProfile(BaseModel):
     """Structured view of one Sketcher::SketchObject's profile geometry.
 
@@ -122,6 +132,9 @@ class SketchProfile(BaseModel):
     circle_radii: list[float] = Field(default_factory=list)  # mm, sorted desc
     arc_radii: list[float] = Field(default_factory=list)  # mm, sorted desc
     constraint_angles: list[float] = Field(default_factory=list)  # rad, sorted desc
+    line_segments: list[SketchLineSegment] = Field(default_factory=list)
+    spline_endpoint_radii: list[float] = Field(default_factory=list)  # mm, sorted desc
+    involute_base_radii: list[float] = Field(default_factory=list)  # mm, sorted desc
 
 
 class MeasurementBank(BaseModel):

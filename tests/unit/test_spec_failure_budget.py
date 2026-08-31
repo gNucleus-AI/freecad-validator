@@ -76,7 +76,7 @@ def test_scorer_counts_inconsistent_and_not_found_as_failures(tmp_path):
     report.summary = compute_summary(report)
 
     scorer = HeuristicSpecConsistencyScorer()
-    scorer._checker = SimpleNamespace(check=lambda _spec, _candidate: report)
+    scorer._checker = SimpleNamespace(check=lambda _spec, _candidate, **_kwargs: report)
     result = scorer.score(str(spec), str(candidate))
 
     assert result.score == 0.8
@@ -100,7 +100,7 @@ def test_scorer_applies_configured_failure_budget(tmp_path):
     report.summary = compute_summary(report)
 
     scorer = HeuristicSpecConsistencyScorer(failure_budget=10)
-    scorer._checker = SimpleNamespace(check=lambda _spec, _candidate: report)
+    scorer._checker = SimpleNamespace(check=lambda _spec, _candidate, **_kwargs: report)
     result = scorer.score(str(spec), str(candidate))
 
     assert result.score == 0.7

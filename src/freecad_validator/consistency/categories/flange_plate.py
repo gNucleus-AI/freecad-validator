@@ -12,10 +12,8 @@ Geometric anchors used for derivation:
 
     plate width / height  → the two larger components of ``aabb_sorted``
                             (the smallest is the plate's thickness)
-    lug edge length       → the ``LineLength`` value in any sketch that
-                            best matches the spec — lug profiles repeat
-                            the same edge length across the N-fold
-                            circular pattern (4× for square mounts)
+    lug edge length       → the uniquely most-repeated ``LineLength``
+                            value in the CAD sketches
     bolt-hole count       → the smallest-radius concave cylinder cluster
 
 Trigger: any spec key contains one of the token groups ``{plate}`` or
@@ -89,28 +87,32 @@ def _aabb_sorted(bank: MeasurementBank) -> tuple[float, float, float] | None:
     return tuple(sorted(float(x) for x in val))  # type: ignore[return-value]
 
 
-def _best_line_length_match(
-    bank: MeasurementBank,
-    target: float,
-    tol: float = 0.5,
-) -> tuple[float, str] | None:
-    """Find the sketch LineLength property whose value is closest to `target`.
-    Returns (value, "<sketch_name>.<prop_key>") or None if no LineLength
-    entry comes within `tol` (relative)."""
-    best: tuple[float, str, float] | None = None  # (value, ref, abs_err)
+def _repeated_line_length(bank: MeasurementBank) -> tuple[float, str] | None:
+    """Return an unambiguous repeated sketch-line length.
+
+    Lug profiles repeat their edge length. Selection is based only on CAD
+    frequency; a tie is ambiguous and deliberately produces no candidate.
+    """
+    groups: list[list[tuple[float, str]]] = []
     for ft in bank.feature_tree:
         for prop_key, val in ft.properties.items():
             if "LineLength" not in prop_key:
                 continue
-            err = abs(val - target)
-            if best is None or err < best[2]:
-                best = (val, f"{ft.name}.{prop_key}", err)
-    if best is None:
+            value = float(val)
+            ref = f"{ft.name}.{prop_key}"
+            for group in groups:
+                anchor = group[0][0]
+                if abs(value - anchor) / max(abs(value), abs(anchor), 1e-9) <= 1e-3:
+                    group.append((value, ref))
+                    break
+            else:
+                groups.append([(value, ref)])
+    repeated = sorted((group for group in groups if len(group) >= 2), key=len, reverse=True)
+    if not repeated or (len(repeated) > 1 and len(repeated[0]) == len(repeated[1])):
         return None
-    val, ref, err = best
-    if target > 0 and err / target > tol:
-        return None
-    return val, ref
+    group = repeated[0]
+    refs = ",".join(ref for _, ref in group)
+    return sum(value for value, _ in group) / len(group), refs
 
 
 def _bolt_hole_count(bank: MeasurementBank) -> tuple[int, str] | None:
@@ -140,7 +142,7 @@ def derived_candidates(
     out: dict[str, tuple[float, str]] = {}
 
     for source in (spec.scalars, spec.counts):
-        for spec_key, spec_val in source.items():
+        for spec_key in source:
             kind = _classify_plate_key(spec_key)
             if kind is None:
                 continue
@@ -157,7 +159,7 @@ def derived_candidates(
                     out[spec_key] = (aabb[1], "flange_plate.aabb[mid]")
 
             elif kind == "lug_edge":
-                hit = _best_line_length_match(bank, float(spec_val))
+                hit = _repeated_line_length(bank)
                 if hit is not None:
                     val, ref = hit
                     out[spec_key] = (val, f"flange_plate.lug_edge({ref})")

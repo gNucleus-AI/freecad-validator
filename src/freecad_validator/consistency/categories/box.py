@@ -20,9 +20,10 @@ Algorithm:
         sketch_max_line  — the longer side of the rectangle sketch
         sketch_min_line  — the shorter side
         extrude_length   — the axial extent
-  * For each spec key `<noun>_<dim>`, score every (sketch, extrude)
-    pair on how well their candidate dimension matches the spec value,
-    and pick the closest.
+  * Select a pair by CAD/profile semantics only. A single rectangular
+    profile can serve bare box dimensions; repeated rectangle profiles
+    identify rungs, and duplicated single rectangles identify rails.
+    Ambiguous compound profiles are left to the generic report.
 """
 
 from __future__ import annotations
@@ -156,54 +157,95 @@ def _sketch_extrude_pairs(bank: MeasurementBank):
     two equal sides collapse to one entry — that way the "second
     largest" value is the OTHER side, not a repeat of the longest."""
     pairs = []
-    pending_sketch = None
-    for ft in bank.feature_tree:
-        type_id, name, props = ft.type_id, ft.name, ft.properties
-        if type_id == "Sketcher::SketchObject":
-            raw = [
-                float(v)
-                for k, v in props.items()
-                if "LineLength" in k and isinstance(v, (int, float))
-            ]
-            pending_sketch = (name, _unique_sorted_desc(raw))
-        elif type_id == "PartDesign::Pad" and pending_sketch is not None:
-            ex_len = float(props.get("Length", 0.0)) if "Length" in props else None
-            pairs.append((pending_sketch[0], pending_sketch[1], name, ex_len))
-            pending_sketch = None
+    entries = {entry.name: entry for entry in bank.feature_tree}
+    for feature in bank.feature_tree:
+        if feature.type_id != "PartDesign::Pad":
+            continue
+        sketches = [
+            entries[name]
+            for name in feature.dependencies
+            if name in entries and entries[name].type_id == "Sketcher::SketchObject"
+        ]
+        if len(sketches) != 1:
+            continue
+        sketch = sketches[0]
+        raw = [
+            float(value)
+            for key, value in sketch.properties.items()
+            if "LineLength" in key and isinstance(value, (int, float))
+        ]
+        ex_len = float(feature.properties["Length"]) if "Length" in feature.properties else None
+        pairs.append((sketch.name, _unique_sorted_desc(raw), feature.name, ex_len))
     return pairs
 
 
-_PLANAR = {"length", "width", "depth"}
 _AXIAL = {"height", "thickness"}
 
 
-def _best_pair_for_value(pairs, dim: str, target: float):
-    """Pick the (value, ref) whose candidate for `dim` is closest to
-    `target` across all (sketch, extrude) pairs.
+def _candidate_from_pair(pair, dim: str):
+    sketch_name, line_lengths, extrude_name, ex_len = pair
+    if dim == "length" and line_lengths:
+        return line_lengths[0], f"{sketch_name}.LineLength[max]"
+    if dim in {"width", "depth"} and line_lengths:
+        return line_lengths[-1], f"{sketch_name}.LineLength[min]"
+    if dim in _AXIAL and ex_len is not None:
+        return ex_len, f"{extrude_name}.Length"
+    return None
 
-    Planar dims (length/width/depth) may bind to ANY unique sketch
-    LineLength — "width" semantically can mean the long or short side
-    depending on the part (drawer width vs. chair-seat width). The
-    closest match wins.
 
-    Axial dims (height/thickness) bind only to the Extrude.Length.
-    """
-    best = None  # (abs_err, value, ref)
-    for sketch_name, line_lengths, extrude_name, ex_len in pairs:
-        candidates = []
-        if dim in _PLANAR:
-            for i, val in enumerate(line_lengths):
-                rank = "max" if i == 0 else f"#{i + 1}"
-                candidates.append((val, f"{sketch_name}.LineLength[{rank}]"))
-        if dim in _AXIAL and ex_len is not None:
-            candidates.append((ex_len, f"{extrude_name}.Length"))
-        for val, ref in candidates:
-            err = abs(val - target)
-            if best is None or err < best[0]:
-                best = (err, val, ref)
-    if best is None:
+def _profile_rectangle_count(bank: MeasurementBank, sketch_name: str) -> int | None:
+    profile = next((item for item in bank.sketch_profiles if item.name == sketch_name), None)
+    if profile is None or len(profile.line_segments) < 4:
         return None
-    return best[1], best[2]
+    if len(profile.line_segments) % 4 != 0:
+        return None
+    return len(profile.line_segments) // 4
+
+
+def _same_pair_dimensions(left, right) -> bool:
+    left_dims = [*left[1], left[3]]
+    right_dims = [*right[1], right[3]]
+    if len(left_dims) != len(right_dims):
+        return False
+    return all(
+        a is not None and b is not None and abs(a - b) / max(abs(a), abs(b), 1e-9) <= 1e-3
+        for a, b in zip(left_dims, right_dims, strict=True)
+    )
+
+
+def _semantic_pair(bank: MeasurementBank, pairs, key: str):
+    """Select a profile without consulting the expected numeric value."""
+    if key in _LENGTHLIKE_TOKENS and len(pairs) == 1:
+        return pairs[0]
+
+    parts = key.split("_")
+    if not parts or parts[-1] not in _LENGTHLIKE_TOKENS:
+        return None
+    qualifier_tokens = set(parts[:-1])
+
+    if "rung" in qualifier_tokens or "rungs" in qualifier_tokens:
+        if {"total", "span", "spacing"} & qualifier_tokens:
+            return None
+        matches = [pair for pair in pairs if (_profile_rectangle_count(bank, pair[0]) or 0) > 1]
+        return matches[0] if len(matches) == 1 else None
+
+    if ("rail" in qualifier_tokens or "rails" in qualifier_tokens) and not {
+        "outer",
+        "span",
+    } & qualifier_tokens:
+        singles = [pair for pair in pairs if _profile_rectangle_count(bank, pair[0]) == 1]
+        groups: list[list] = []
+        for pair in singles:
+            for group in groups:
+                if _same_pair_dimensions(pair, group[0]):
+                    group.append(pair)
+                    break
+            else:
+                groups.append([pair])
+        repeated = [group for group in groups if len(group) >= 2]
+        return repeated[0][0] if len(repeated) == 1 else None
+
+    return None
 
 
 def derived_candidates(
@@ -224,11 +266,7 @@ def derived_candidates(
     if not pairs:
         return out
     for source in (spec.scalars, spec.counts):
-        for key, spec_val in source.items():
-            try:
-                target = float(spec_val)
-            except (TypeError, ValueError):
-                continue
+        for key in source:
             dim = _classify_dim(key)
             if dim is None:
                 continue
@@ -238,7 +276,10 @@ def derived_candidates(
             noun_parts = parts[:-1] if parts[-1] in _LENGTHLIKE_TOKENS else parts
             if any(tok in _FEATURE_NOUNS for tok in noun_parts):
                 continue
-            hit = _best_pair_for_value(pairs, dim, target)
+            pair = _semantic_pair(bank, pairs, key)
+            if pair is None:
+                continue
+            hit = _candidate_from_pair(pair, dim)
             if hit is None:
                 continue
             value, ref = hit

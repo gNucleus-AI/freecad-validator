@@ -60,77 +60,6 @@ _MIN_TEETH_FOR_GEAR = 10
 # radial offsets aren't scaled by cos β.
 _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
 
-# Token-based key classification — same rule set as `gear.py` plus the
-# helical-specific keys. Order is most-specific first so multi-token
-# combos win over single-token fallbacks.
-_CANONICAL_RULES: tuple[tuple[str, frozenset[str]], ...] = (
-    ("transverse_pressure_angle", frozenset({"transverse", "pressure", "angle"})),
-    ("transverse_module", frozenset({"transverse", "module"})),
-    ("normal_pressure_angle", frozenset({"normal", "pressure", "angle"})),
-    ("normal_module", frozenset({"normal", "module"})),
-    ("helix_angle", frozenset({"helix", "angle"})),
-    ("helix_hand", frozenset({"helix", "hand"})),
-    ("lead", frozenset({"lead"})),
-    ("diametral_pitch", frozenset({"diametral", "pitch"})),
-    ("circular_pitch", frozenset({"circular", "pitch"})),
-    ("pressure_angle", frozenset({"pressure", "angle"})),
-    ("outer_diameter", frozenset({"outer", "diameter"})),
-    ("root_diameter", frozenset({"root", "diameter"})),
-    ("base_diameter", frozenset({"base", "diameter"})),
-    ("pitch_diameter", frozenset({"pitch", "diameter"})),
-    ("tooth_thickness", frozenset({"teeth", "thickness"})),
-    ("whole_depth", frozenset({"whole", "depth"})),
-    ("module", frozenset({"module"})),
-    ("teeth", frozenset({"teeth"})),
-    ("addendum", frozenset({"addendum"})),
-    ("dedendum", frozenset({"dedendum"})),
-    ("clearance", frozenset({"clearance"})),
-)
-
-# Cede spline-prefixed keys to `SplineCategory` (some helical-gear cases
-# also carry an internal spline; we don't want both categories to claim
-# the spline keys).
-_SPLINE_EXCLUSIVE_TOKENS: frozenset[str] = frozenset({"spline"})
-
-
-def _tokens(key: str) -> frozenset[str]:
-    """Tokenize by `_`, normalizing `tooth` → `teeth` so either singular
-    or plural forms classify the same."""
-    return frozenset("teeth" if t == "tooth" else t for t in key.split("_"))
-
-
-def _classify_key(key: str) -> str | None:
-    """Map a spec key to a canonical helical-gear param via token presence.
-    Returns None for spline-exclusive keys or keys that match no rule."""
-    toks = _tokens(key)
-    if toks & _SPLINE_EXCLUSIVE_TOKENS:
-        return None
-    for canon, required in _CANONICAL_RULES:
-        if required.issubset(toks):
-            return canon
-    return None
-
-
-def _is_helical_spec(spec: StructuredSpec) -> bool:
-    """A spec is a helical-gear spec iff it declares ``helix_angle``.
-    No other heuristic is reliable — the presence of ``gear`` tokens
-    alone could equally be a spur gear."""
-    for source in (spec.scalars, spec.counts):
-        for key in source:
-            if _classify_key(key) == "helix_angle":
-                return True
-    return False
-
-
-def _find_spec_value(spec: StructuredSpec, canonical: str) -> tuple[str, float] | None:
-    """Search spec.scalars + spec.counts for a key that classifies as
-    ``canonical``. Returns (key, value) of first match or None."""
-    for source in (spec.scalars, spec.counts):
-        for key, value in source.items():
-            if _classify_key(key) == canonical:
-                return key, float(value)
-    return None
-
 
 def derive_params(
     module_n: float,
@@ -258,140 +187,21 @@ def measurable_params_from_bank(bank: MeasurementBank) -> dict[str, float] | Non
     }
 
 
-def _resolve_module(
-    spec: StructuredSpec,
-    teeth: int,
-    helix_angle_rad: float,
-    measured: dict[str, float] | None,
-) -> tuple[float | None, str | None]:
-    """Pick the most authoritative normal module ``m_n`` for the case.
-
-    Priority order (each step is the most direct derivation when the
-    inputs are present):
-
-      1. Spec declares ``module`` / ``normal_module``     → trust it.
-      2. Spec declares ``pitch_diameter``                  → m_n = pitch · cos(β) / z.
-      3. Spec declares ``outer_diameter``                  → m_n = outer / (z/cos β + 2).
-      4. Spec declares ``root_diameter``                   → m_n = root  / (z/cos β − 2.5).
-      5. Bank found a tooth ring (textbook 4.5·m fallback) → m_n from measured.
-
-    Returns ``(module_n, source_label)`` or ``(None, None)`` if no
-    derivation is possible.
-    """
-    module_match = _find_spec_value(spec, "module") or _find_spec_value(spec, "normal_module")
-    if module_match is not None:
-        return module_match[1], "spec"
-
-    cos_b = math.cos(helix_angle_rad)
-
-    pitch_match = _find_spec_value(spec, "pitch_diameter")
-    if pitch_match is not None:
-        return (pitch_match[1] * cos_b / teeth, "spec.pitch_diameter · cos β / teeth")
-
-    outer_match = _find_spec_value(spec, "outer_diameter")
-    if outer_match is not None:
-        return (outer_match[1] / (teeth / cos_b + 2.0), "spec.outer_diameter ÷ (z/cos β + 2)")
-
-    root_match = _find_spec_value(spec, "root_diameter")
-    if root_match is not None:
-        denom = teeth / cos_b - 2.5
-        if denom > 0:
-            return (root_match[1] / denom, "spec.root_diameter ÷ (z/cos β − 2.5)")
-
-    if measured is not None and measured.get("module", 0) > 0:
-        return measured["module"], "(outer_d − root_d) / 4.5 bank fallback"
-
-    return None, None
-
-
 def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
-    """Return ``{spec_key: (value, feature_ref)}`` for every helical-gear
-    param derivable from the spec (and optionally the bank's tooth ring).
+    """Return no numeric refinements until helix geometry is measurable.
 
-    No-op for non-helical specs (no ``helix_angle`` key declared). When
-    the spec is helical, we drive the derivation from
-    ``(m_n, z, β, α_n)`` and emit canonical values for every spec key
-    that classifies onto a derived param.
+    The bank can sometimes expose a helical gear's tip/root rings and
+    tooth count, but it does not currently measure helix angle or normal
+    pressure angle. Reading those values from the expected spec would
+    make every dependent result circular. Generic CAD checks remain
+    authoritative; the category's separate helix-hand check is still
+    allowed because it measures handedness directly from the FCStd.
     """
-    if not _is_helical_spec(spec):
-        return {}
-
-    # Helix angle is required by definition of "helical spec". The spec
-    # may declare it in either radians or degrees; the upstream parser
-    # normalizes ``*_angle`` values to radians by the time they hit
-    # ``spec.scalars``, so no conversion is needed here.
-    helix_match = _find_spec_value(spec, "helix_angle")
-    if helix_match is None:
-        return {}
-    beta = helix_match[1]
-
-    teeth_from_spec = _find_spec_value(spec, "teeth")
-    measured = measurable_params_from_bank(bank)
-    outer_d: float | None
-    root_d: float | None
-
-    if teeth_from_spec is not None:
-        teeth = int(teeth_from_spec[1])
-        # Same anti-mismatch guard as spur: if the bank found a tooth
-        # ring with a different count (e.g. an internal spline's 12
-        # teeth on a part whose gear has 100 teeth), the bank's
-        # outer_d / root_d belong to that other feature — drop them
-        # for the helical-gear derivation.
-        if measured is not None and int(measured["number_of_teeth"]) == teeth:
-            outer_d = measured["outer_diameter"]
-            root_d = measured["root_diameter"]
-        else:
-            outer_d = None
-            root_d = None
-    elif measured is not None:
-        teeth = int(measured["number_of_teeth"])
-        outer_d = measured["outer_diameter"]
-        root_d = measured["root_diameter"]
-    else:
-        return {}
-
-    module_n, module_source = _resolve_module(spec, teeth, beta, measured)
-    if module_n is None:
-        return {}
-
-    angle_match = _find_spec_value(spec, "pressure_angle") or _find_spec_value(
-        spec, "normal_pressure_angle"
-    )
-    alpha_n = angle_match[1] if angle_match is not None else DEFAULT_PRESSURE_ANGLE_RAD
-
-    derived = derive_params(
-        module_n=module_n,
-        teeth=teeth,
-        helix_angle_rad=beta,
-        normal_pressure_angle_rad=alpha_n,
-        outer_d=outer_d,
-        root_d=root_d,
-    )
-
-    if outer_d is not None and root_d is not None:
-        ref = (
-            f"helical_gear.derived_from_cad(outer_d={outer_d:.3f}, "
-            f"root_d={root_d:.3f}, z={teeth}, m_n={module_n:g} [{module_source}], "
-            f"β={math.degrees(beta):.1f}°, α_n={math.degrees(alpha_n):.1f}°)"
-        )
-    else:
-        ref = (
-            f"helical_gear.derived_from_spec(z={teeth}, m_n={module_n:g} "
-            f"[{module_source}], β={math.degrees(beta):.1f}°, "
-            f"α_n={math.degrees(alpha_n):.1f}°)"
-        )
-
-    out: dict[str, tuple[float, str]] = {}
-    for source in (spec.scalars, spec.counts):
-        for spec_key in source:
-            canonical = _classify_key(spec_key)
-            if canonical is None or canonical not in derived:
-                continue
-            out[spec_key] = (float(derived[canonical]), ref)
-    return out
+    del bank, spec
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +308,15 @@ def _apply_helix_hand_check(
     measured_hand = _measure_helix_hand_from_fcstd(report.fcstd_path)
     if measured_hand is None:
         return
+
+    # The generic checker keeps string-valued params visible as not_found.
+    # Once this category has a real CAD-side handedness measurement, replace
+    # that placeholder instead of double-counting the same parameter.
+    report.not_found = [finding for finding in report.not_found if finding.param != "helix_hand"]
+    report.consistent = [finding for finding in report.consistent if finding.param != "helix_hand"]
+    report.inconsistent = [
+        finding for finding in report.inconsistent if finding.param != "helix_hand"
+    ]
 
     del tol_scalar  # exact string match; no tolerance
 
