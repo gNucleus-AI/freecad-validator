@@ -5,8 +5,17 @@ from __future__ import annotations
 from freecad_validator.consistency.categories.helical_gear import (
     derived_candidates as helical_gear_candidates,
 )
+from freecad_validator.consistency.categories.impeller import (
+    derived_candidates as impeller_candidates,
+)
+from freecad_validator.consistency.categories.pipe_elbow import (
+    derived_candidates as pipe_elbow_candidates,
+)
 from freecad_validator.consistency.categories.spline import (
     derived_candidates as spline_candidates,
+)
+from freecad_validator.consistency.categories.spring_clip import (
+    derived_candidates as spring_clip_candidates,
 )
 from freecad_validator.measurement.schema import ClusterSummary, MeasurementBank
 from freecad_validator.spec.parser import parse_spec
@@ -56,3 +65,33 @@ def test_spline_does_not_derive_candidate_values_from_spec():
     )
 
     assert spline_candidates(MeasurementBank(), spec) == {}
+
+
+def test_impeller_does_not_echo_unmeasurable_spec_values():
+    spec = _spec(
+        "impeller",
+        "blade_root_radius = 12 mm\nblade_height = 8 mm\nblade_twist_angle = 15 deg",
+    )
+
+    assert impeller_candidates(MeasurementBank(), spec) == {}
+
+
+def test_spring_clip_does_not_echo_unmeasurable_spec_values():
+    spec = _spec(
+        "spring_clip",
+        "leg_length = 20 mm\nretention_lobe_center_offset = 3 mm\nlobe_arc_span_angle = 40 deg",
+    )
+
+    assert spring_clip_candidates(MeasurementBank(), spec) == {}
+
+
+def test_pipe_elbow_does_not_echo_unmeasurable_spec_values():
+    spec = _spec(
+        "pipe_elbow",
+        "rib_anchor_offset = 4 mm\n"
+        "rib_profile_span = 7 mm\n"
+        "rib_left_vertical_height = 5 mm\n"
+        "flange_radial_width = 6 mm",
+    )
+
+    assert pipe_elbow_candidates(MeasurementBank(), spec) == {}
