@@ -308,90 +308,17 @@ def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
-    """Return ``{spec_key: (value, feature_ref)}`` for every helical-gear
-    param derivable from the spec (and optionally the bank's tooth ring).
+    """Return no numeric refinements until helix geometry is measurable.
 
-    No-op for non-helical specs (no ``helix_angle`` key declared). When
-    the spec is helical, we drive the derivation from
-    ``(m_n, z, β, α_n)`` and emit canonical values for every spec key
-    that classifies onto a derived param.
+    The bank can sometimes expose a helical gear's tip/root rings and
+    tooth count, but it does not currently measure helix angle or normal
+    pressure angle. Reading those values from the expected spec would
+    make every dependent result circular. Generic CAD checks remain
+    authoritative; the category's separate helix-hand check is still
+    allowed because it measures handedness directly from the FCStd.
     """
-    if not _is_helical_spec(spec):
-        return {}
-
-    # Helix angle is required by definition of "helical spec". The spec
-    # may declare it in either radians or degrees; the upstream parser
-    # normalizes ``*_angle`` values to radians by the time they hit
-    # ``spec.scalars``, so no conversion is needed here.
-    helix_match = _find_spec_value(spec, "helix_angle")
-    if helix_match is None:
-        return {}
-    beta = helix_match[1]
-
-    teeth_from_spec = _find_spec_value(spec, "teeth")
-    measured = measurable_params_from_bank(bank)
-    outer_d: float | None
-    root_d: float | None
-
-    if teeth_from_spec is not None:
-        teeth = int(teeth_from_spec[1])
-        # Same anti-mismatch guard as spur: if the bank found a tooth
-        # ring with a different count (e.g. an internal spline's 12
-        # teeth on a part whose gear has 100 teeth), the bank's
-        # outer_d / root_d belong to that other feature — drop them
-        # for the helical-gear derivation.
-        if measured is not None and int(measured["number_of_teeth"]) == teeth:
-            outer_d = measured["outer_diameter"]
-            root_d = measured["root_diameter"]
-        else:
-            outer_d = None
-            root_d = None
-    elif measured is not None:
-        teeth = int(measured["number_of_teeth"])
-        outer_d = measured["outer_diameter"]
-        root_d = measured["root_diameter"]
-    else:
-        return {}
-
-    module_n, module_source = _resolve_module(spec, teeth, beta, measured)
-    if module_n is None:
-        return {}
-
-    angle_match = _find_spec_value(spec, "pressure_angle") or _find_spec_value(
-        spec, "normal_pressure_angle"
-    )
-    alpha_n = angle_match[1] if angle_match is not None else DEFAULT_PRESSURE_ANGLE_RAD
-
-    derived = derive_params(
-        module_n=module_n,
-        teeth=teeth,
-        helix_angle_rad=beta,
-        normal_pressure_angle_rad=alpha_n,
-        outer_d=outer_d,
-        root_d=root_d,
-    )
-
-    if outer_d is not None and root_d is not None:
-        ref = (
-            f"helical_gear.derived_from_cad(outer_d={outer_d:.3f}, "
-            f"root_d={root_d:.3f}, z={teeth}, m_n={module_n:g} [{module_source}], "
-            f"β={math.degrees(beta):.1f}°, α_n={math.degrees(alpha_n):.1f}°)"
-        )
-    else:
-        ref = (
-            f"helical_gear.derived_from_spec(z={teeth}, m_n={module_n:g} "
-            f"[{module_source}], β={math.degrees(beta):.1f}°, "
-            f"α_n={math.degrees(alpha_n):.1f}°)"
-        )
-
-    out: dict[str, tuple[float, str]] = {}
-    for source in (spec.scalars, spec.counts):
-        for spec_key in source:
-            canonical = _classify_key(spec_key)
-            if canonical is None or canonical not in derived:
-                continue
-            out[spec_key] = (float(derived[canonical]), ref)
-    return out
+    del bank, spec
+    return {}
 
 
 # ---------------------------------------------------------------------------

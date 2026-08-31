@@ -189,89 +189,22 @@ def derived_candidates(
     bank: MeasurementBank,
     spec: StructuredSpec,
 ) -> dict[str, tuple[float, str]]:
-    """Return ``{spec_key: (value, feature_ref)}`` for every spline-derivable
-    param in the spec.
+    """Return no refinements until spline parameters have CAD anchors.
 
-    Three passes:
-
-      1. **Base-triple derivation** (when ``module + teeth`` are
-         present): emit textbook-proportion values for the canonical
-         spline params via :func:`derive_params`. Skipped for specs
-         that only declare major/minor diameters without a module.
-      2. **Spec-trust override for major/minor diameters**: the
-         textbook ``addendum=m`` / ``dedendum=1.25m`` assumptions don't
-         hold for every spline standard (short-addendum, flat-root,
-         straight-sided variants legitimately differ). When the spec
-         names a ``*major_diameter`` or ``*minor_diameter``, we trust
-         the declared value over the derived one.
-      3. **Spec-trust for unitless ratios** (``*_fraction`` /
-         ``*_ratio``): these have no CAD measurement path; echo the
-         spec value so the case isn't dragged below 1.0 by a param
-         without a measurement.
-
-    ``bank`` is accepted for signature parity with the other
-    categories' top-level ``derived_candidates`` functions, but spline
-    derivation happens purely from the spec (CAD-side cross-checks
-    for measurable diameters live in the generic per-kind checks).
+    The previous implementation ignored ``bank`` and reconstructed all
+    values from the expected module/teeth/diameter declarations. That
+    cannot validate a candidate. Generic CAD checks remain authoritative
+    until the measurement layer exposes a spline-specific tooth ring and
+    profile measurements.
     """
-    del bank  # unused — see docstring
-    if not _is_spline_spec(spec):
-        return {}
-
-    out: dict[str, tuple[float, str]] = {}
-
-    # --- Pass 1: base-triple derivation -------------------------------
-    triple = _extract_base_triple(spec)
-    if triple is not None:
-        module, teeth, alpha = triple
-        derived = derive_params(module, teeth, alpha)
-        alpha_deg = math.degrees(alpha)
-        ref = f"spline.derived(m={module:g}, z={teeth}, α={alpha_deg:.1f}°)"
-        for source in (spec.scalars, spec.counts):
-            for spec_key in source:
-                canonical = _classify_key(spec_key)
-                if canonical is None or canonical not in derived:
-                    continue
-                out[spec_key] = (float(derived[canonical]), ref)
-
-    # --- Pass 2: trust-spec for major/minor diameters -----------------
-    # Spline tooth systems differ in addendum/dedendum proportions —
-    # short-addendum (15° flat-root), 30° fillet-root, 45° straight-
-    # sided, 37.5°, etc. — so the textbook m / 1.25m defaults are
-    # best-guess fallbacks only. When the spec declares a major or
-    # minor diameter explicitly, that value is authoritative.
-    for canonical in ("major_diameter", "minor_diameter"):
-        match = _find_spec_value(spec, canonical)
-        if match is None:
-            continue
-        spec_key, spec_val = match
-        out[spec_key] = (
-            float(spec_val),
-            f"spline.trust_spec({spec_key}={spec_val:g}, declared in spec)",
-        )
-
-    # --- Pass 3: trust-spec for unitless ratios -----------------------
-    # ``spline_tooth_width_fraction`` and similar ratios describe the
-    # tooth-width-vs-circular-pitch proportion; not directly observable
-    # in the bank, so echo the spec value.
-    for source in (spec.scalars, spec.counts):
-        for spec_key, spec_val in source.items():
-            toks = _tokens(spec_key)
-            if "spline" not in toks:
-                continue
-            if ("fraction" in toks or "ratio" in toks) and spec_key not in out:
-                out[spec_key] = (
-                    float(spec_val),
-                    f"spline.trust_spec({spec_key}={spec_val:g}, unitless ratio)",
-                )
-
-    return out
+    del bank, spec
+    return {}
 
 
 # ---------------------------------------------------------------------------
 # Category subclass.
-# Splines don't inspect the bank — derivation is spec-driven — so the
-# wrapper ignores the first argument.
+# Numeric spline refinement is intentionally disabled until the bank
+# exposes spline-specific CAD measurements.
 # ---------------------------------------------------------------------------
 
 
