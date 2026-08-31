@@ -67,3 +67,31 @@ def test_matching_cad_anchor_still_supports_gear_derivations():
     }
     assert {key: value for key, (value, _ref) in derived.items()} == expected
     assert all("derived_from_cad" in ref for _value, ref in derived.values())
+
+
+def test_spec_module_and_pressure_angle_cannot_validate_themselves():
+    spec = parse_spec(
+        {
+            "name": "spur gear",
+            "key_parameters": (
+                "gear_module = 2 mm\n"
+                "number_of_teeth = 20\n"
+                "pressure_angle = 25 deg\n"
+                "pitch_diameter = 40 mm\n"
+                "circular_pitch = 6.283 mm\n"
+                "base_diameter = 36.252 mm\n"
+                "outer_diameter = 22 mm\n"
+                "root_diameter = 17.5 mm"
+            ),
+        }
+    )
+
+    derived = derived_candidates(_gear_bank(teeth=20), spec)
+    values = {key: value for key, (value, _ref) in derived.items()}
+
+    # The measured tip/root circles imply module 1, not the declared 2.
+    assert values["gear_module"] == pytest.approx(1.0)
+    assert values["pitch_diameter"] == pytest.approx(20.0)
+    assert values["circular_pitch"] == pytest.approx(3.141592653589793)
+    assert "pressure_angle" not in values
+    assert "base_diameter" not in values

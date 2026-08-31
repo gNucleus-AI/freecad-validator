@@ -37,10 +37,10 @@ declared, and even then the leak only affects the derived
 pitch_diameter (a nominal value); the actually-measured outer_d /
 root_d are still correct.
 
-The one input we *do* take from the spec is `pressure_angle`, which
-has no direct geometric measurement path today. Defaults to 20° when
-the spec doesn't declare it (the most common modern value, but not
-universal).
+Category outputs never use the expected spec value as a measurement.
+Pressure angle and base diameter stay with the generic checker because
+the gear measurement bank does not currently expose a CAD-grounded
+pressure-angle measurement.
 """
 
 from __future__ import annotations
@@ -69,6 +69,25 @@ _MIN_TEETH_FOR_GEAR = 10
 # module here only affects the *derived* addendum/dedendum, and those
 # are anyway overridden by direct CAD measurements downstream.
 _FALLBACK_WHOLE_DEPTH_PER_MODULE = 4.5
+
+# Parameters whose complete dependency chain is grounded in the CAD
+# tooth-ring measurements. ``pressure_angle`` and ``base_diameter`` are
+# intentionally excluded: deriving either requires an unmeasured angle.
+_CAD_GROUNDED_OUTPUTS: frozenset[str] = frozenset(
+    {
+        "module",
+        "pitch_diameter",
+        "addendum",
+        "dedendum",
+        "whole_depth",
+        "clearance",
+        "circular_pitch",
+        "tooth_thickness",
+        "outer_diameter",
+        "root_diameter",
+        "diametral_pitch",
+    }
+)
 
 # Token-based key classification. Rule order is most-specific first so
 # multi-token combos (like `pitch` + `diameter` → `pitch_diameter`) win
@@ -292,9 +311,8 @@ def derived_candidates(
 
     Derivation requires ``measurable_params_from_bank`` to find both tip
     and root radii plus a tooth count in the candidate CAD. Declared
-    module and pressure-angle values may refine calculations only after
-    that geometry anchor exists. Values derived solely from the expected
-    spec cannot validate the candidate.
+    values are calculated only from that anchor. Expected spec values
+    never become candidate measurements.
 
     Returns empty when the bank cannot anchor the gear geometry or when
     its measured tooth count disagrees with the declared count. In both
@@ -312,55 +330,38 @@ def derived_candidates(
             # internal spline. Do not turn the declared count into a
             # substitute CAD measurement; leave generic findings intact.
             return {}
-        teeth = declared_teeth
+        teeth = int(measured["number_of_teeth"])
     else:
         teeth = int(measured["number_of_teeth"])
 
     outer_d = measured["outer_diameter"]
     root_d = measured["root_diameter"]
 
-    # Prefer the spec's declared `module` (or back-derive from declared
-    # pitch_diameter + teeth) over CAD-estimated module. The CAD path
-    # hits a textbook-proportion assumption (whole_depth ≈ 4.5·m) and
-    # picks up FP noise from root_d measurements — both show up as
-    # sub-1% drift that cascades into addendum / dedendum when those
-    # are computed from (outer_d − pitch_d)/2. Using the spec's
-    # declared module when available gives a clean pitch_d and lets
-    # the CAD-measured addendum/dedendum stay aligned with the spec.
-    module_from_spec = _find_spec_value(spec, "module")
-    if module_from_spec is not None:
-        module = module_from_spec[1]
-        module_source = "spec"
-    else:
-        pitch_from_spec = _find_spec_value(spec, "pitch_diameter")
-        if pitch_from_spec is not None:
-            module = pitch_from_spec[1] / teeth
-            module_source = "spec.pitch_diameter ÷ teeth"
-        else:
-            module = measured["module"]
-            module_source = "(outer_d − root_d) / 4.5 fallback"
-
-    angle_match = _find_spec_value(spec, "pressure_angle")
-    alpha = angle_match[1] if angle_match is not None else DEFAULT_PRESSURE_ANGLE_RAD
+    module = measured["module"]
+    module_source = "(outer_d − root_d) / 4.5 CAD fallback"
 
     derived = derive_params(
         module,
         teeth,
-        alpha,
+        DEFAULT_PRESSURE_ANGLE_RAD,
         outer_d=outer_d,
         root_d=root_d,
     )
     ref = (
         f"gear.derived_from_cad(outer_d={outer_d:.3f}, root_d={root_d:.3f}, "
         f"z={teeth}, m={module:g} [{module_source}], "
-        f"α={math.degrees(alpha):.1f}°)"
+        "pressure_angle=unmeasured)"
     )
 
     out: dict[str, tuple[float, str]] = {}
     for source in (spec.scalars, spec.counts):
         for spec_key in source:
             canonical = _classify_key(spec_key)
-            if canonical is None or canonical not in derived:
+            if (
+                canonical is None
+                or canonical not in derived
+                or canonical not in _CAD_GROUNDED_OUTPUTS
+            ):
                 continue
             out[spec_key] = (float(derived[canonical]), ref)
     return out
