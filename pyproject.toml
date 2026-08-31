@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gnucleus-freecad-validator"
-version = "0.3.0"
+version = "0.4.0"
 description = "Deterministic validation for FreeCAD geometry, design specifications, and solved FreeCAD/CalculiX FEM analyses."
 readme = "README.md"
 requires-python = ">=3.11"
