@@ -8,8 +8,10 @@ denominator used for failed parameters:
     score = consistent / total_params                     # default
     score = max(0, 1 - failures / min(total, budget))     # configured
 
-The check assumes each case carries its own ``param_check.py`` next
-to the FCStd; without one, only the generic per-kind checks run.
+The scorer resolves an optional trusted ``param_check.py`` beside the
+spec JSON. Candidate directories are never searched for executable
+checker code; without a trusted file, only the generic per-kind checks
+run.
 
 Dependency direction is one-way: this scorer imports from
 ``freecad_validator.consistency``; nothing there imports anything
@@ -26,7 +28,6 @@ from pathlib import Path
 
 from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.consistency.checker import ConsistencyChecker, SpecTolerances
-from freecad_validator.spec.parser import load_spec_json
 
 from .base import FCStdBaseScorer
 
@@ -62,9 +63,9 @@ def _failure_budget_score(
 class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
     """Score a candidate ``.FCStd`` against a spec ``.json``.
 
-    Pure consumer flow: relies on a per-case ``param_check.py`` next
-    to the FCStd for category-level refinement. Cases without one
-    get only the generic per-kind checks.
+    Pure consumer flow: resolves a trusted per-case ``param_check.py``
+    next to the spec JSON for category-level refinement. Cases without
+    one get only the generic per-kind checks.
     """
 
     name = "heuristic_spec_consistency"
@@ -88,13 +89,7 @@ class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
             if not os.path.isfile(path):
                 return ComparisonResult(score=0.0, reason=f"{label} not found: {path}")
 
-        spec = load_spec_json(reference)
-        param_check_path = Path(reference).resolve().parent / "param_check.py"
-        report = self._checker.check(
-            spec,
-            candidate,
-            param_check_path=param_check_path,
-        )
+        report = self._checker.check(reference, candidate)
 
         summary = report.summary
         if summary is None or summary.total_params == 0:

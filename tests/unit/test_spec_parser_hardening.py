@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from types import SimpleNamespace
 
@@ -9,7 +10,7 @@ import pytest
 
 from freecad_validator.consistency.checker import ConsistencyChecker
 from freecad_validator.measurement.extractors import FeatureTreeExtractor
-from freecad_validator.measurement.schema import MeasurementBank
+from freecad_validator.measurement.schema import ClusterSummary, MeasurementBank
 from freecad_validator.spec.parser import parse_key_parameters, parse_spec
 
 
@@ -102,13 +103,63 @@ def test_checker_never_loads_param_check_from_candidate_directory(tmp_path, monk
         encoding="utf-8",
     )
     spec = {"name": "case", "key_parameters": "length = 10 mm"}
+    spec_path = spec_dir / "spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
     checker = ConsistencyChecker()
 
     without_explicit_path = checker.check(spec, candidate)
-    with_trusted_path = checker.check(spec, candidate, param_check_path=trusted_check)
+    with_trusted_path = checker.check(spec_path, candidate)
 
     assert without_explicit_path.error is None
     assert with_trusted_path.error == "trusted checker executed"
+
+
+def test_trusted_category_refines_cad_anchored_gear_without_partdesign_history(
+    tmp_path, monkeypatch
+):
+    """A minimal alternative feature history still yields positive evidence.
+
+    The bank has only the repeated CAD tooth-ring surfaces, not a Sketch/Pad
+    feature history. That is enough for GearCategory to verify module and
+    pitch diameter through the trusted, case-controlled checker.
+    """
+    ring = {
+        "count": 20,
+        "axis": (0.0, 0.0, 1.0),
+        "convex": True,
+        "centroids": [],
+        "axial_extent": 10.0,
+    }
+    bank = MeasurementBank(
+        solid_count=1,
+        cylinder_clusters=[
+            ClusterSummary(id="tip", radius=11.0, **ring),
+            ClusterSummary(id="root", radius=8.75, **ring),
+        ],
+    )
+    monkeypatch.setattr("freecad_validator.consistency.checker.extract_bank", lambda _path: bank)
+    candidate = tmp_path / "answer.FCStd"
+    candidate.write_bytes(b"not opened by patched extractor")
+    trusted_check = tmp_path / "param_check.py"
+    trusted_check.write_text(
+        "from freecad_validator.consistency.categories.gear import GearCategory\n"
+        "def apply(report, bank, spec, tol_scalar):\n"
+        "    GearCategory().apply(report, bank, spec, tol_scalar)\n",
+        encoding="utf-8",
+    )
+    spec = {
+        "name": "alternate_gear_history",
+        "key_parameters": "number_of_teeth = 20\ngear_module = 1 mm\ngear_pitch_diameter = 20 mm",
+    }
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    report = ConsistencyChecker().check(spec_path, candidate)
+
+    assert report.summary is not None
+    assert report.summary.consistent == 3
+    assert report.summary.inconsistent == 0
+    assert report.summary.not_found == 0
 
 
 def test_checker_reports_when_spec_has_zero_parseable_parameters(tmp_path, monkeypatch):
@@ -164,10 +215,11 @@ def test_trusted_param_check_is_registered_while_it_executes(tmp_path, monkeypat
         encoding="utf-8",
     )
 
-    report = ConsistencyChecker().check(
-        {"name": "case", "key_parameters": "length = 10 mm"},
-        candidate,
-        param_check_path=param_check,
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(
+        json.dumps({"name": "case", "key_parameters": "length = 10 mm"}),
+        encoding="utf-8",
     )
+    report = ConsistencyChecker().check(spec_path, candidate)
 
     assert report.error == "registered"

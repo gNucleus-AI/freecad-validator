@@ -348,7 +348,7 @@ the caller:
 Optional spec field `categories: ["gear", ...]` opts into
 family-specific checks.
 
-### `param_check.py` auto-discovery
+### Trusted `param_check.py` loading
 
 If `param_check.py` sits next to the spec JSON
 (`Path(spec_json).parent / "param_check.py"`), the validator loads it
@@ -361,6 +361,29 @@ are never searched for executable checker code.
 > producer may supply the FCStd contents, but must not be able to write
 > `param_check.py` beside the spec. Isolate untrusted runs at the process
 > or container level and copy only the candidate FCStd into the layout.
+
+#### Migration and score compatibility
+
+`ConsistencyChecker.check()` no longer discovers a `param_check.py` next to
+the candidate FCStd. Direct callers that need case refinement pass their
+trusted spec JSON using the existing first argument:
+
+```python
+report = ConsistencyChecker().check(
+    spec_json,
+    candidate_fcstd,
+)
+```
+
+Passing an in-memory spec mapping intentionally runs generic checks only. Do
+not restore candidate-side discovery: it would execute candidate-controlled
+Python in the grader process.
+
+Scores can be lower than in releases that accepted spec-derived category
+fallbacks. Parameters without candidate-CAD evidence now remain
+`not_found`; under a configured failure budget, each such required parameter
+reduces the spec score. This is a validation-coverage change, not a change to
+the candidate model.
 
 ### Batch CLI layout
 
