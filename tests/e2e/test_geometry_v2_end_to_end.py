@@ -1,10 +1,10 @@
 """V2 scorer end-to-end against real FreeCAD geometry.
 
 Covers the core V2 design requirements: congruent parts built through
-different feature histories must score 1.0 (face centers coincide
-exactly), pose recovery must survive rotations, translations, and
-near-symmetric parts (permutation-enumerated init), and spatially wrong
-geometry must be penalized even when scalars match.
+different feature histories with the same face decomposition score 1.0,
+pose recovery survives rotations, translations, and near-symmetric parts
+(permutation-enumerated init), and spatially wrong geometry is penalized even
+when scalars match.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ def make_moved_box(path: Path, length: float, width: float, height: float) -> Pa
         fc.closeDocument(doc.Name)
 
 
-# --- congruence must score 1.0 ----------------------------------------------
+# --- matching face decompositions must score 1.0 ----------------------------
 
 
 def test_v2_self_comparison_is_exactly_one(box_10x5x3):
@@ -95,8 +95,8 @@ def test_v2_self_comparison_is_exactly_one(box_10x5x3):
 
 
 def test_icp_congruent_different_history_is_exactly_one(box_10x5x3, tmp_path):
-    """Face centers of congruent decompositions coincide exactly — no
-    sampling-noise floor, reward snaps to 1.0."""
+    """These congruent builds retain the same face decomposition, so their
+    face centers coincide and the reward snaps to 1.0."""
     candidate = make_sketch_pad_box(tmp_path / "sketch_pad_box.FCStd", 10, 5, 3)
     result = FaceCenterICPComparator().compare(str(box_10x5x3), str(candidate))
     assert result.score == 1.0
