@@ -14,8 +14,10 @@ import numpy as np
 import pytest
 
 from freecad_validator import Validator
+from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.comparators.icp import (
     _PROPER_PERMUTATIONS,
+    FaceCenterICPComparator,
     _compute_reward,
     _principal_frame,
     _trimmed_icp,
@@ -79,6 +81,35 @@ def test_combine_v2_missing_keys_treated_as_zero():
 
 def test_combine_v2_clamps_out_of_range():
     assert combine_subscores_v2({name: 10.0 for name in COMPARATOR_WEIGHTS_V2}) == 1.0
+
+
+def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch):
+    """An ICP complexity/topology gate remains a final geometry gate."""
+    from freecad_validator.scorers.geometry_v2 import HeuristicGeometryScorerV2
+
+    scorer = HeuristicGeometryScorerV2()
+    geom_result = ComparisonResult(
+        score=1.0,
+        reason="scalar properties match",
+        details={
+            "subscores": {name: 1.0 for name in PROPERTY_SCORE_NAMES},
+            "solid_count": 1,
+        },
+    )
+    icp_result = ComparisonResult(
+        score=0.0,
+        reason="candidate exceeds ICP complexity ceiling",
+        details={"gated": True, "n_faces_candidate": 5001},
+    )
+    monkeypatch.setattr(scorer._geom, "compare", lambda *_args: geom_result)
+    monkeypatch.setattr(scorer._icp, "compare", lambda *_args: icp_result)
+
+    result = scorer.score("reference.FCStd", "candidate.FCStd")
+
+    assert result.score == 0.0
+    assert result.reason == icp_result.reason
+    assert result.details["gated"] is True
+    assert result.details["icp_details"]["n_faces_candidate"] == 5001
 
 
 # --- face-center ICP math ---------------------------------------------------
@@ -147,6 +178,31 @@ def test_reward_snaps_to_exactly_one_below_threshold():
     assert _compute_reward(1e-12) == 1.0
     assert _compute_reward(0.1) == pytest.approx(0.9, abs=1e-9)
     assert _compute_reward(0.1) < 1.0
+
+
+def test_icp_reason_excludes_internal_search_diagnostics(monkeypatch):
+    points = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 3.0],
+        ]
+    )
+    features = {
+        "centers": points,
+        "areas": np.ones(len(points)),
+        "n_vertices": len(points),
+    }
+    monkeypatch.setattr("freecad_validator.comparators.icp._face_features", lambda _path: features)
+
+    reason = FaceCenterICPComparator().compare("reference.FCStd", "candidate.FCStd").reason
+
+    assert "reward=" in reason
+    assert "max_residual=" in reason
+    assert "permutation=" not in reason
+    assert "refined=" not in reason
+    assert "iterations=" not in reason
 
 
 # --- validator wiring: scorer version + spec failure budget ------------------

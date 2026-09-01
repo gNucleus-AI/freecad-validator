@@ -112,7 +112,7 @@ def test_scorer_applies_configured_failure_budget(tmp_path):
 def test_validator_exposes_default_and_custom_failure_budget():
     # The default budget is scorer-version dependent: v2 (the default
     # scorer) applies DEFAULT_V2_FAILURE_BUDGET, v1 keeps the legacy
-    # disabled default so it reproduces pre-0.4.0 numbers exactly.
+    # disabled default from v0.4.
     assert Validator().spec_failure_budget == DEFAULT_V2_FAILURE_BUDGET
     assert Validator(scorer_version="v1").spec_failure_budget == DEFAULT_FAILURE_BUDGET
     assert Validator(spec_failure_budget=20).spec_failure_budget == 20

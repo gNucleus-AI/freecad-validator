@@ -8,7 +8,7 @@ returns the two component scores side-by-side plus a combined score:
                               surface_area + bbox + principal_moments,
                               multiplied by a face-center-ICP spatial factor);
                               ``scorer_version="v1"`` selects the legacy flat
-                              weighted sum and reproduces pre-0.4.0 numbers
+                              weighted sum and retains v0.4 scoring behavior
   - ``cad_spec_consistency`` from ``HeuristicSpecConsistencyScorer``
   - ``combined``             aggregate of the two (see ``CombineMethod``)
 
@@ -66,7 +66,7 @@ DEFAULT_SCORER_VERSION: ScorerVersion = "v2"
 #: Spec failure budget applied by default under the v2 scorer: each failed
 #: spec parameter costs 1/10 once a spec has >= 10 parameters, so large specs
 #: cannot dilute failures. v1 keeps the legacy default (None — plain
-#: consistent/total scoring) so it reproduces pre-0.4.0 numbers exactly.
+#: consistent/total scoring) from v0.4.
 DEFAULT_V2_FAILURE_BUDGET = 10
 
 #: Sentinel meaning "the caller did not choose a budget — apply the default
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=SCORER_VERSIONS,
         default=DEFAULT_SCORER_VERSION,
         help="geometry scorer version (default: v2 — property fidelity x "
-        "face-center-ICP spatial factor; v1 reproduces pre-0.4.0 numbers)",
+        "face-center-ICP spatial factor; v1 retains v0.4 scoring behavior)",
     )
     add_tolerance_arguments(parser)
     add_spec_tolerance_arguments(parser)

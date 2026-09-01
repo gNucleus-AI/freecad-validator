@@ -74,7 +74,7 @@ def _add_scorer_argument(p: argparse.ArgumentParser) -> None:
         default=DEFAULT_SCORER_VERSION,
         help="geometry scorer version (default: v2 — property fidelity x "
         "face-center-ICP spatial factor, spec failure budget 10; "
-        "v1 reproduces pre-0.4.0 numbers exactly)",
+        "v1 retains v0.4 scoring behavior)",
     )
 
 

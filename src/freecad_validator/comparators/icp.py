@@ -416,9 +416,7 @@ class FaceCenterICPComparator(FCStdBaseComparator):
         reward = _compute_reward(max_residual)
         reason = (
             f"{reference_name} vs {candidate_name}: reward={reward:.3f} "
-            f"rmse={best['rmse']:.4e} max_residual={max_residual:.4e} mm "
-            f"(permutation={best_permutation}, refined={refined}, "
-            f"iterations={int(best['iterations'])})"
+            f"rmse={best['rmse']:.4e} max_residual={max_residual:.4e} mm"
         )
         return ComparisonResult(
             score=reward,
