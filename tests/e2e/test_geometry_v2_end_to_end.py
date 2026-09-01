@@ -128,13 +128,16 @@ def test_icp_accepts_symmetric_pose(tmp_path):
 
 
 def test_v2_rejects_displaced_small_feature(tmp_path):
-    """Full bidirectional ICP coverage must include the displaced hole."""
+    """V2 must penalize a displaced hole that V1's global scalars miss."""
     reference = make_plate_with_hole(tmp_path / "plate_ref.FCStd", 13, 10)
     candidate = make_plate_with_hole(tmp_path / "plate_moved.FCStd", 16, 10)
+    v1 = HeuristicGeometryScorer().score(str(reference), str(candidate))
     icp = FaceCenterICPComparator().compare(str(reference), str(candidate))
     v2 = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
 
+    assert v1.score == 1.0
     assert icp.score < 0.9
+    assert v2.score < v1.score
     assert v2.score < 0.7
 
 
