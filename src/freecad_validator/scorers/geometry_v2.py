@@ -133,7 +133,10 @@ class HeuristicGeometryScorerV2(FCStdBaseScorer):
     name = "heuristic_geometry_v2"
 
     def __init__(self, tolerances: GeometryTolerances | None = None):
-        self._geom = GeometryComparator(tolerances=tolerances)
+        self._geom = GeometryComparator(
+            tolerances=tolerances,
+            include_principal_moments=True,
+        )
         self._icp = FaceCenterICPComparator()
 
     def score(self, reference: str, candidate: str) -> ComparisonResult:

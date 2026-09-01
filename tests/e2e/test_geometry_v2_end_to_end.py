@@ -15,6 +15,7 @@ import pytest
 from _geometry import _save, freecad, make_box
 
 from freecad_validator import Validator
+from freecad_validator.comparators import geometry as geometry_comparator
 from freecad_validator.comparators.icp import FaceCenterICPComparator
 from freecad_validator.scorers.geometry import HeuristicGeometryScorer
 from freecad_validator.scorers.geometry_v2 import HeuristicGeometryScorerV2
@@ -126,21 +127,27 @@ def test_icp_accepts_symmetric_pose(tmp_path):
 # --- spatial errors must be penalized ----------------------------------------
 
 
-def test_displaced_small_feature_is_a_known_icp_blind_spot(tmp_path):
-    """DOCUMENTED LIMITATION, pinned so a future fix is noticed.
-
-    Trimmed face-center ICP keeps the closest 80% of pairs when scoring, so
-    on this 7-face plate the single displaced hole's pair is trimmed away and
-    the reward stays high. Catching sub-trim-fraction feature displacement
-    would require a point-to-surface, per-face deviation metric, which this
-    package does not implement (README "Known limitation"). If this
-    assertion starts failing low, the scoring arithmetic changed — re-check
-    the v1 compatibility contract.
-    """
+def test_v2_rejects_displaced_small_feature(tmp_path):
+    """Full bidirectional ICP coverage must include the displaced hole."""
     reference = make_plate_with_hole(tmp_path / "plate_ref.FCStd", 13, 10)
     candidate = make_plate_with_hole(tmp_path / "plate_moved.FCStd", 16, 10)
-    result = FaceCenterICPComparator().compare(str(reference), str(candidate))
-    assert result.score > 0.9  # the blind spot, by design of the trim
+    icp = FaceCenterICPComparator().compare(str(reference), str(candidate))
+    v2 = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
+
+    assert icp.score < 0.9
+    assert v2.score < 0.7
+
+
+def test_v2_rejects_plate_with_missing_hole(tmp_path):
+    """A candidate missing a reference face cannot pass on subset matches."""
+    reference = make_plate_with_hole(tmp_path / "plate_with_hole.FCStd", 13, 10)
+    candidate = make_box(tmp_path / "plate_without_hole.FCStd", 40, 30, 5)
+
+    icp = FaceCenterICPComparator().compare(str(reference), str(candidate))
+    v2 = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
+
+    assert icp.score < 0.9
+    assert v2.score < 0.7
 
 
 def test_v2_penalizes_scaled_copy(box_10x5x3, tmp_path):
@@ -196,6 +203,20 @@ def test_v1_scores_are_unchanged_by_v2_addition(box_10x5x3, box_20x5x3):
     assert same.score == pytest.approx(1.0)
     different = HeuristicGeometryScorer().score(str(box_10x5x3), str(box_20x5x3))
     assert different.score < same.score
+
+
+def test_v1_does_not_extract_principal_moments(box_10x5x3, monkeypatch):
+    """A V2-only feature failure must not affect the v0.4 V1 path."""
+
+    def fail_if_called(_shape):
+        raise AssertionError("V1 must not extract principal moments")
+
+    monkeypatch.setattr(geometry_comparator, "_normalized_principal_moments", fail_if_called)
+
+    result = HeuristicGeometryScorer().score(str(box_10x5x3), str(box_10x5x3))
+
+    assert result.score == 1.0
+    assert "principal_moments" not in result.details["subscores"]
 
 
 def test_validator_scorer_versions_diverge_on_spatially_wrong_part(

@@ -9,20 +9,24 @@ from __future__ import annotations
 
 import argparse
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from freecad_validator import Validator
+from freecad_validator.comparators import geometry as geometry_comparator
 from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.comparators.icp import (
     _PROPER_PERMUTATIONS,
     FaceCenterICPComparator,
+    _bidirectional_residuals,
     _compute_reward,
     _principal_frame,
     _trimmed_icp,
     _umeyama_rigid_transform,
 )
+from freecad_validator.scorers.geometry import HeuristicGeometryScorer
 from freecad_validator.scorers.geometry_v2 import (
     COMPARATOR_WEIGHTS_V2,
     PROPERTY_SCORE_NAMES,
@@ -112,6 +116,28 @@ def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch):
     assert result.details["icp_details"]["n_faces_candidate"] == 5001
 
 
+def test_v1_feature_extraction_does_not_compute_principal_moments(monkeypatch):
+    """The v0.4-compatible path must not depend on a V2-only extraction."""
+
+    def fail_if_called(_shape):
+        raise AssertionError("V1 must not extract principal moments")
+
+    monkeypatch.setattr(geometry_comparator, "_normalized_principal_moments", fail_if_called)
+    shape = SimpleNamespace(
+        BoundBox=SimpleNamespace(XLength=10.0, YLength=5.0, ZLength=3.0),
+        Solids=[object()],
+        Faces=[],
+        Vertexes=[],
+        Volume=150.0,
+        Area=190.0,
+    )
+
+    features = geometry_comparator._shape_features(shape)
+
+    assert "principal_moments_normalized" not in features
+    assert HeuristicGeometryScorer()._geom.include_principal_moments is False
+
+
 # --- face-center ICP math ---------------------------------------------------
 
 
@@ -178,6 +204,56 @@ def test_reward_snaps_to_exactly_one_below_threshold():
     assert _compute_reward(1e-12) == 1.0
     assert _compute_reward(0.1) == pytest.approx(0.9, abs=1e-9)
     assert _compute_reward(0.1) < 1.0
+
+
+def test_bidirectional_residuals_include_unmatched_reference_points():
+    candidate = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 3.0],
+        ]
+    )
+    reference = np.vstack((candidate, np.array([[8.0, 7.0, 6.0]])))
+
+    residuals = _bidirectional_residuals(candidate, reference)
+
+    assert residuals["candidate_to_reference_max_residual"] == 0.0
+    assert residuals["reference_to_candidate_max_residual"] > 0.0
+    assert residuals["max_residual"] == residuals["reference_to_candidate_max_residual"]
+
+
+def test_icp_cannot_score_incomplete_subset_as_perfect(monkeypatch):
+    candidate_points = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 3.0],
+        ]
+    )
+    reference_points = np.vstack((candidate_points, np.array([[8.0, 7.0, 6.0]])))
+
+    def face_features(path):
+        points = reference_points if "reference" in path else candidate_points
+        return {
+            "centers": points,
+            "areas": np.ones(len(points)),
+            "n_vertices": 8,
+        }
+
+    monkeypatch.setattr("freecad_validator.comparators.icp._face_features", face_features)
+    monkeypatch.setattr(
+        "freecad_validator.comparators.icp._candidate_poses",
+        lambda *_args: [(np.eye(3), np.zeros(3))],
+    )
+
+    result = FaceCenterICPComparator().compare("reference.FCStd", "candidate.FCStd")
+
+    assert result.score < 1.0
+    assert result.details["candidate_to_reference_max_residual"] == pytest.approx(0.0)
+    assert result.details["reference_to_candidate_max_residual"] > 0.0
 
 
 def test_icp_reason_excludes_internal_search_diagnostics(monkeypatch):
