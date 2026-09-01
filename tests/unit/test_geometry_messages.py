@@ -27,7 +27,11 @@ def test_gate_reason_identifies_side_without_parent_path(
     reference = "/private/tmp/run/reference/model.FCStd"
     candidate = "/private/tmp/run/candidate/model.FCStd"
     values = iter(extracted)
-    monkeypatch.setattr(geometry, "_select_shape_and_features", lambda _path: next(values))
+    monkeypatch.setattr(
+        geometry,
+        "_select_shape_and_features",
+        lambda _path, **_kwargs: next(values),
+    )
 
     result = comparator.compare(reference, candidate)
 
@@ -48,7 +52,11 @@ def test_no_solid_reason_identifies_side_without_parent_path(
     reference = "/private/tmp/run/reference/model.FCStd"
     candidate = "/private/tmp/run/candidate/model.FCStd"
     values = iter(extracted)
-    monkeypatch.setattr(geometry, "_select_shape_and_features", lambda _path: next(values))
+    monkeypatch.setattr(
+        geometry,
+        "_select_shape_and_features",
+        lambda _path, **_kwargs: next(values),
+    )
 
     result = comparator.compare(reference, candidate)
 
