@@ -34,6 +34,8 @@ from typing import Any
 
 from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.comparators.geometry import (
+    BBOX_FAR_REL_TOL,
+    BBOX_MATCHED_REL_TOL,
     GeometryComparator,
     GeometryTolerances,
 )
@@ -122,18 +124,43 @@ class HeuristicGeometryScorer(FCStdBaseScorer):
         )
 
 
-def add_tolerance_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register all GeometryTolerances fields as CLI flags.
+_TOLERANCE_VERSIONS = {
+    "volume_matched_rel_tol": ("v1", "v2"),
+    "volume_far_rel_tol": ("v1", "v2"),
+    "area_matched_rel_tol": ("v1", "v2"),
+    "area_far_rel_tol": ("v1", "v2"),
+    "bbox_far_rel_tol": ("v1", "v2"),
+    "bbox_matched_rel_tol": ("v1",),
+    "surface_types_exact_tol": ("v1",),
+    "surface_types_zero_score": ("v1",),
+    "surface_types_matched_rel_tol": ("v2",),
+    "surface_types_far_rel_tol": ("v2",),
+    "principal_moments_matched_rel_tol": ("v2",),
+    "principal_moments_far_rel_tol": ("v2",),
+}
 
-    Each flag defaults to None so callers can detect overrides and pass
-    only the explicit ones into `tolerances_from_args`, leaving the rest
-    on their pydantic defaults.
+
+def add_tolerance_arguments(
+    parser: argparse.ArgumentParser, *, scorer_version: str | None = None
+) -> None:
+    """Register scoring options grouped by their supported versions.
+
+    A fixed-version CLI exposes only its own options. The joint CLI exposes
+    both versions and validates explicit overrides after parsing --scorer.
+    None defaults distinguish omitted options from explicit values.
     """
+    if scorer_version not in (None, "v1", "v2"):
+        raise ValueError(f"unknown scorer version: {scorer_version!r}")
     defaults = GeometryTolerances()
-    group = parser.add_argument_group("geometry tolerances")
-    for field_name in GeometryTolerances.model_fields:
+    groups = {}
+    for field_name, versions in _TOLERANCE_VERSIONS.items():
+        if scorer_version is not None and scorer_version not in versions:
+            continue
+        label = f"geometry tolerances ({', '.join(versions)})"
+        if label not in groups:
+            groups[label] = parser.add_argument_group(label)
         cli_flag = f"--{field_name.replace('_', '-')}"
-        group.add_argument(
+        groups[label].add_argument(
             cli_flag,
             type=float,
             default=None,
@@ -141,16 +168,36 @@ def add_tolerance_arguments(parser: argparse.ArgumentParser) -> None:
         )
 
 
-def tolerances_from_args(args: argparse.Namespace) -> GeometryTolerances | None:
-    """Build a GeometryTolerances from argparse, or return None when no
-    tolerance flag was overridden (so the comparator uses its defaults)."""
+def tolerances_from_args(
+    args: argparse.Namespace, *, scorer_version: str
+) -> GeometryTolerances | None:
+    """Reject options for another scorer, then build the explicit overrides."""
+    if scorer_version not in ("v1", "v2"):
+        raise ValueError(f"unknown scorer version: {scorer_version!r}")
     overrides = {
         name: getattr(args, name)
         for name in GeometryTolerances.model_fields
         if getattr(args, name, None) is not None
     }
+    unsupported = [
+        f"--{name.replace('_', '-')} ({', '.join(_TOLERANCE_VERSIONS[name])} only)"
+        for name in overrides
+        if scorer_version not in _TOLERANCE_VERSIONS[name]
+    ]
+    if unsupported:
+        raise ValueError(
+            f"geometry options not supported by scorer {scorer_version}: {', '.join(unsupported)}"
+        )
     if not overrides:
         return None
+    if scorer_version == "v2" and "bbox_far_rel_tol" in overrides:
+        # V2 exposes only the bbox rejection threshold. Keep its internal
+        # diagnostic interval ordered when the gate is tightened, using the
+        # default matched/far ratio and never widening the matched tolerance.
+        overrides["bbox_matched_rel_tol"] = min(
+            BBOX_MATCHED_REL_TOL,
+            overrides["bbox_far_rel_tol"] * (BBOX_MATCHED_REL_TOL / BBOX_FAR_REL_TOL),
+        )
     return GeometryTolerances(**overrides)
 
 
@@ -169,12 +216,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("reference_fcstd", help="Reference .FCStd path (ground truth)")
     parser.add_argument("candidate_fcstd", help="Candidate .FCStd path to compare")
-    add_tolerance_arguments(parser)
+    add_tolerance_arguments(parser, scorer_version="v1")
     args = parser.parse_args(argv)
+    try:
+        tolerances = tolerances_from_args(args, scorer_version="v1")
+    except ValueError as exc:
+        parser.error(str(exc))
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    scorer = HeuristicGeometryScorer(tolerances=tolerances_from_args(args))
+    scorer = HeuristicGeometryScorer(tolerances=tolerances)
     result = scorer.score(
         os.path.abspath(args.reference_fcstd),
         os.path.abspath(args.candidate_fcstd),

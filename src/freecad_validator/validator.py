@@ -217,11 +217,15 @@ def main(argv: list[str] | None = None) -> int:
     add_spec_tolerance_arguments(parser)
     add_spec_scoring_arguments(parser)
     args = parser.parse_args(argv)
+    try:
+        geom_tolerances = tolerances_from_args(args, scorer_version=args.scorer)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     validator = HeuristicValidator(
-        geom_tolerances=tolerances_from_args(args),
+        geom_tolerances=geom_tolerances,
         spec_tolerances=spec_tolerances_from_args(args),
         spec_failure_budget=spec_failure_budget_from_args(args),
         combine_method=args.combine_method,

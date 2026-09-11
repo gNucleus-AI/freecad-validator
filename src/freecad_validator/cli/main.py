@@ -100,7 +100,7 @@ def _add_validate_args(p: argparse.ArgumentParser) -> None:
 
 def _run_validate(args: argparse.Namespace) -> int:
     validator = Validator(
-        geom_tolerances=tolerances_from_args(args),
+        geom_tolerances=args.geom_tolerances,
         spec_tolerances=spec_tolerances_from_args(args),
         spec_failure_budget=spec_failure_budget_from_args(args),
         combine_method=args.combine_method,
@@ -237,7 +237,7 @@ def _run_batch(args: argparse.Namespace) -> int:
     out_json = args.output_summary or args.sample_data_dir / "validation_summary.json"
 
     validator = Validator(
-        geom_tolerances=tolerances_from_args(args),
+        geom_tolerances=args.geom_tolerances,
         spec_tolerances=spec_tolerances_from_args(args),
         spec_failure_budget=spec_failure_budget_from_args(args),
         combine_method=args.combine_method,
@@ -571,6 +571,11 @@ def main(argv: list[str] | None = None) -> int:
         p.set_defaults(func=run_fn)
 
     args = parser.parse_args(argv)
+    if args.command in ("validate", "batch"):
+        try:
+            args.geom_tolerances = tolerances_from_args(args, scorer_version=args.scorer)
+        except ValueError as exc:
+            parser.error(str(exc))
     return args.func(args)
 
 

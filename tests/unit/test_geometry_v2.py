@@ -102,13 +102,18 @@ def test_bbox_diagnostic_does_not_contribute_reward():
         (0.1, 0.1, False),
         (0.100001, 0.1, False),
         (0.05, 0.05, False),
+        (0.004999, 0.005, True),
+        (0.005, 0.005, False),
+        (0.005001, 0.005, False),
     ],
 )
 def test_bbox_gate_boundary_and_override(monkeypatch, error, threshold, passed):
     from freecad_validator.scorers.geometry_v2 import HeuristicGeometryScorerV2
 
     scorer = HeuristicGeometryScorerV2(
-        geometry_comparator.GeometryTolerances(bbox_far_rel_tol=threshold)
+        geometry_comparator.GeometryTolerances(
+            bbox_matched_rel_tol=min(0.01, threshold / 10), bbox_far_rel_tol=threshold
+        )
     )
     geom_result = ComparisonResult(
         score=0.0,
