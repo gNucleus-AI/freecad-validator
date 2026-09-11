@@ -34,10 +34,16 @@ from typing import Any
 
 from freecad_validator.comparators.base import ComparisonResult
 from freecad_validator.comparators.geometry import (
-    BBOX_FAR_REL_TOL,
-    BBOX_MATCHED_REL_TOL,
     GeometryComparator,
     GeometryTolerances,
+)
+
+# Keep the existing helper imports available to callers of this module.
+from freecad_validator.scorers.arguments import (
+    add_tolerance_arguments as add_tolerance_arguments,
+)
+from freecad_validator.scorers.arguments import (
+    tolerances_from_args as tolerances_from_args,
 )
 from freecad_validator.scorers.base import FCStdBaseScorer
 
@@ -122,83 +128,6 @@ class HeuristicGeometryScorer(FCStdBaseScorer):
                 "geom_details": geom_result.details,
             },
         )
-
-
-_TOLERANCE_VERSIONS = {
-    "volume_matched_rel_tol": ("v1", "v2"),
-    "volume_far_rel_tol": ("v1", "v2"),
-    "area_matched_rel_tol": ("v1", "v2"),
-    "area_far_rel_tol": ("v1", "v2"),
-    "bbox_far_rel_tol": ("v1", "v2"),
-    "bbox_matched_rel_tol": ("v1",),
-    "surface_types_exact_tol": ("v1",),
-    "surface_types_zero_score": ("v1",),
-    "surface_types_matched_rel_tol": ("v2",),
-    "surface_types_far_rel_tol": ("v2",),
-    "principal_moments_matched_rel_tol": ("v2",),
-    "principal_moments_far_rel_tol": ("v2",),
-}
-
-
-def add_tolerance_arguments(
-    parser: argparse.ArgumentParser, *, scorer_version: str | None = None
-) -> None:
-    """Register scoring options grouped by their supported versions.
-
-    A fixed-version CLI exposes only its own options. The joint CLI exposes
-    both versions and validates explicit overrides after parsing --scorer.
-    None defaults distinguish omitted options from explicit values.
-    """
-    if scorer_version not in (None, "v1", "v2"):
-        raise ValueError(f"unknown scorer version: {scorer_version!r}")
-    defaults = GeometryTolerances()
-    groups = {}
-    for field_name, versions in _TOLERANCE_VERSIONS.items():
-        if scorer_version is not None and scorer_version not in versions:
-            continue
-        label = f"geometry tolerances ({', '.join(versions)})"
-        if label not in groups:
-            groups[label] = parser.add_argument_group(label)
-        cli_flag = f"--{field_name.replace('_', '-')}"
-        groups[label].add_argument(
-            cli_flag,
-            type=float,
-            default=None,
-            help=(f"override {field_name} (default: {getattr(defaults, field_name)})"),
-        )
-
-
-def tolerances_from_args(
-    args: argparse.Namespace, *, scorer_version: str
-) -> GeometryTolerances | None:
-    """Reject options for another scorer, then build the explicit overrides."""
-    if scorer_version not in ("v1", "v2"):
-        raise ValueError(f"unknown scorer version: {scorer_version!r}")
-    overrides = {
-        name: getattr(args, name)
-        for name in GeometryTolerances.model_fields
-        if getattr(args, name, None) is not None
-    }
-    unsupported = [
-        f"--{name.replace('_', '-')} ({', '.join(_TOLERANCE_VERSIONS[name])} only)"
-        for name in overrides
-        if scorer_version not in _TOLERANCE_VERSIONS[name]
-    ]
-    if unsupported:
-        raise ValueError(
-            f"geometry options not supported by scorer {scorer_version}: {', '.join(unsupported)}"
-        )
-    if not overrides:
-        return None
-    if scorer_version == "v2" and "bbox_far_rel_tol" in overrides:
-        # V2 exposes only the bbox rejection threshold. Keep its internal
-        # diagnostic interval ordered when the gate is tightened, using the
-        # default matched/far ratio and never widening the matched tolerance.
-        overrides["bbox_matched_rel_tol"] = min(
-            BBOX_MATCHED_REL_TOL,
-            overrides["bbox_far_rel_tol"] * (BBOX_MATCHED_REL_TOL / BBOX_FAR_REL_TOL),
-        )
-    return GeometryTolerances(**overrides)
 
 
 def main(argv: list[str] | None = None) -> int:

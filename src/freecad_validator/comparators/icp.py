@@ -327,21 +327,27 @@ class FaceCenterICPComparator(FCStdBaseComparator):
         reference_name = os.path.basename(reference_fcstd)
         if source is None:
             return ComparisonResult(
-                score=0.0, reason=f"No solid shape found in candidate '{candidate_name}'"
+                score=0.0,
+                reason=f"No solid shape found in candidate '{candidate_name}'",
+                details={"gated": True, "gate": "icp"},
             )
         if target is None:
             return ComparisonResult(
-                score=0.0, reason=f"No solid shape found in reference '{reference_name}'"
+                score=0.0,
+                reason=f"No solid shape found in reference '{reference_name}'",
+                details={"gated": True, "gate": "icp"},
             )
         if "_gate_reason" in target:
             return ComparisonResult(
                 score=0.0,
                 reason=f"{target['_gate_reason']} in reference model '{reference_name}'",
+                details={"gated": True, "gate": "icp"},
             )
         if "_gate_reason" in source:
             return ComparisonResult(
                 score=0.0,
                 reason=f"{source['_gate_reason']} in candidate model '{candidate_name}'",
+                details={"gated": True, "gate": "icp"},
             )
 
         source_points, source_areas = source["centers"], source["areas"]

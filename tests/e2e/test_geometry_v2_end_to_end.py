@@ -176,24 +176,23 @@ def test_v2_bbox_accepts_rotated_translated_solids(tmp_path, dimensions, axis, a
         assert result.score == pytest.approx(1.0)
         assert result.details["bbox_gate"]["passed"] is True
         assert result.details["bbox_gate"]["relative_error"] == pytest.approx(0.0, abs=1e-10)
-        assert result.details["geom_details"]["bbox_unaligned_rel_diff"] > 0.1
-        assert result.details["geom_details"]["bbox_frame"] == "icp_aligned"
+        assert result.details["geom_details"]["bbox_frame"] == "occt_obb"
         assert result.details["subscores"]["bbox"] == pytest.approx(1.0)
     assert candidate.read_bytes() == original
 
 
-def test_v2_aligned_bbox_measures_curved_solid_not_face_center_bounds(tmp_path):
+def test_v2_obb_measures_curved_solid_independently_of_face_centers(tmp_path):
     reference = make_cylinder(tmp_path / "curved_ref.FCStd", 4, 12)
     candidate = move_copy(reference, tmp_path / "curved_cand.FCStd", (1, 2, 3), 37)
     result = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
 
     # The three cylinder face centers are collinear and do not span its diameter.
     assert result.score == pytest.approx(1.0)
-    assert result.details["geom_details"]["bbox_candidate"] == pytest.approx([8, 8, 12])
+    assert result.details["geom_details"]["bbox_candidate"] == pytest.approx([8, 8, 12], rel=1e-3)
     assert result.details["bbox_gate"]["passed"] is True
 
 
-def test_v2_skips_bbox_gate_for_rotated_solid_without_icp_pose(tmp_path):
+def test_v2_checks_bbox_for_rotated_solid_without_icp_pose(tmp_path):
     fc = freecad()
     doc = fc.newDocument("cone_ref")
     reference = tmp_path / "cone_ref.FCStd"
@@ -208,9 +207,100 @@ def test_v2_skips_bbox_gate_for_rotated_solid_without_icp_pose(tmp_path):
     result = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
 
     assert result.details["icp_details"]["vacuous_match"] is True
-    assert result.details["bbox_gate"]["passed"] is None
-    assert result.details["geom_details"]["bbox_frame"] == "unaligned"
+    assert result.details["bbox_gate"]["passed"] is True
+    assert result.details["geom_details"]["bbox_frame"] == "occt_obb"
     assert result.score == pytest.approx(1.0)
+
+
+def test_v2_rejects_scaled_cone_without_running_icp(tmp_path, monkeypatch):
+    fc = freecad()
+    paths = []
+    for scale in (1, 10):
+        doc = fc.newDocument(f"cone_{scale}")
+        try:
+            body = doc.addObject("PartDesign::Body", "Body")
+            cone = body.newObject("PartDesign::AdditiveCone", "Cone")
+            cone.Radius1, cone.Radius2, cone.Height = 5 * scale, 0, 20 * scale
+            paths.append(_save(doc, tmp_path / f"cone_{scale}.FCStd"))
+        finally:
+            fc.closeDocument(doc.Name)
+    scorer = HeuristicGeometryScorerV2()
+
+    def unexpected_icp(*_args):
+        raise AssertionError("The independent size gate must run before ICP")
+
+    monkeypatch.setattr(scorer._icp, "compare", unexpected_icp)
+    result = scorer.score(*(str(path) for path in paths))
+    assert result.score == 0.0
+    assert result.details["gate"] == "bbox"
+    assert result.details["bbox_gate"]["relative_error"] == pytest.approx(0.9)
+
+
+def test_v2_obb_accepts_congruent_ellipse_with_different_curve_seam(tmp_path):
+    fc = freecad()
+    import Part
+    import Sketcher  # noqa: F401 - registers the native sketch object type
+
+    paths, shapes = [], []
+    for i, start in enumerate((None, 0.7)):
+        doc = fc.newDocument(f"ellipse_{i}")
+        try:
+            body = doc.addObject("PartDesign::Body", "Body")
+            sketch = body.newObject("Sketcher::SketchObject", "Sketch")
+            ellipse = Part.Ellipse(fc.Vector(), 10, 1)
+            curve = (
+                ellipse if start is None else Part.ArcOfEllipse(ellipse, start, start + 2 * math.pi)
+            )
+            sketch.addGeometry(curve, False)
+            doc.recompute()
+            pad = body.newObject("PartDesign::Pad", "Pad")
+            pad.Profile, pad.Length = sketch, 20
+            paths.append(_save(doc, tmp_path / f"ellipse_{i}.FCStd"))
+            shapes.append(body.Shape.copy())
+        finally:
+            fc.closeDocument(doc.Name)
+    assert shapes[0].cut(shapes[1]).Volume == 0.0
+    assert shapes[1].cut(shapes[0]).Volume == 0.0
+    original = [path.read_bytes() for path in paths]
+    result = HeuristicGeometryScorerV2().score(*(str(path) for path in paths))
+    assert result.details["bbox_gate"]["passed"] is True
+    assert result.details["bbox_gate"]["relative_error"] < 0.01
+    assert result.score > 0.99
+    assert [path.read_bytes() for path in paths] == original
+
+
+def test_v2_does_not_reopen_candidate_for_bbox(box_10x5x3, monkeypatch):
+    fc = freecad()
+    original_open = fc.open
+    calls = []
+
+    def counted_open(path):
+        calls.append(path)
+        return original_open(path)
+
+    monkeypatch.setattr(fc, "open", counted_open)
+    result = HeuristicGeometryScorerV2().score(str(box_10x5x3), str(box_10x5x3))
+    assert result.score == 1.0
+    assert len(calls) == 4
+
+
+def test_v2_checks_native_face_count_before_obb(box_10x5x3, monkeypatch):
+    # Lower the policy limit to exercise the real FreeCAD extraction cheaply.
+    # The unit test separately covers the production 5000/5001 boundary.
+    monkeypatch.setattr(FaceCenterICPComparator, "MAX_CANDIDATE_FACES", 5)
+
+    def unexpected_obb(_brep):
+        raise AssertionError("An over-limit candidate must not reach OBB meshing")
+
+    monkeypatch.setattr(
+        "freecad_validator.comparators.occt_bbox.oriented_bbox_dimensions", unexpected_obb
+    )
+    result = HeuristicGeometryScorerV2().score(str(box_10x5x3), str(box_10x5x3))
+    assert result.score == 0.0
+    assert result.details["gate"] == "complexity"
+    assert result.details["n_faces_candidate"] == 6
+    assert result.details["max_candidate_faces"] == 5
+    assert HeuristicGeometryScorer().score(str(box_10x5x3), str(box_10x5x3)).score == 1.0
 
 
 def test_icp_accepts_symmetric_pose(tmp_path):
@@ -277,7 +367,7 @@ def test_v2_penalizes_scaled_copy(box_10x5x3, tmp_path):
     assert v2.score == 0.0
     assert v2.details["gate"] == "bbox"
     assert v2.details["bbox_gate"]["relative_error"] == pytest.approx(0.5)
-    assert "icp_details" in v2.details
+    assert "icp_details" not in v2.details
     assert v2.details["subscores"]["volume"] == 0.0
     assert v2.details["subscores"]["bbox"] == 0.0
 

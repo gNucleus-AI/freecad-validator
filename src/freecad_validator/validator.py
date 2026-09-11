@@ -42,11 +42,11 @@ from pydantic import BaseModel
 
 from freecad_validator.comparators.geometry import GeometryTolerances
 from freecad_validator.consistency.checker import SpecTolerances
-from freecad_validator.scorers.geometry import (
-    HeuristicGeometryScorer,
+from freecad_validator.scorers.arguments import (
     add_tolerance_arguments,
     tolerances_from_args,
 )
+from freecad_validator.scorers.geometry import HeuristicGeometryScorer
 from freecad_validator.scorers.geometry_v2 import HeuristicGeometryScorerV2
 from freecad_validator.scorers.spec_consistency import (
     DEFAULT_FAILURE_BUDGET,
@@ -73,6 +73,20 @@ DEFAULT_V2_FAILURE_BUDGET = 10
 #: Sentinel meaning "the caller did not choose a budget — apply the default
 #: for the selected scorer version".
 BUDGET_UNSET: Any = object()
+
+
+def add_scorer_argument(parser: argparse.ArgumentParser) -> None:
+    """Register the version selector consistently across joint scoring CLIs."""
+    parser.add_argument(
+        "--scorer",
+        choices=SCORER_VERSIONS,
+        default=DEFAULT_SCORER_VERSION,
+        help=f"geometry scorer version (default: {DEFAULT_SCORER_VERSION}); "
+        "v2 uses an independent OCCT bbox gate "
+        f"(default {100 * GeometryTolerances().bbox_far_rel_tol:g}%%), property fidelity x "
+        f"face-center-ICP spatial factor, and spec failure budget {DEFAULT_V2_FAILURE_BUDGET}; "
+        "v1 retains v0.4 scoring behavior",
+    )
 
 
 def spec_failure_budget_from_args(args: argparse.Namespace) -> Any:
@@ -206,13 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         help="how to aggregate the two sub-scores into `combined` "
         f"(default: {DEFAULT_COMBINE_METHOD})",
     )
-    parser.add_argument(
-        "--scorer",
-        choices=SCORER_VERSIONS,
-        default=DEFAULT_SCORER_VERSION,
-        help="geometry scorer version (default: v2 — property fidelity x "
-        "face-center-ICP spatial factor; v1 retains v0.4 scoring behavior)",
-    )
+    add_scorer_argument(parser)
     add_tolerance_arguments(parser)
     add_spec_tolerance_arguments(parser)
     add_spec_scoring_arguments(parser)

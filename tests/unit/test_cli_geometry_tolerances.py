@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 import pytest
 
+import freecad_validator.cli.main as cli_module
+from freecad_validator import GeometryTolerances, ValidationResult, Validator
 from freecad_validator.cli.main import main as cli_main
-from freecad_validator.scorers.geometry import (
+from freecad_validator.scorers.arguments import (
+    _TOLERANCE_VERSIONS,
     add_tolerance_arguments,
     tolerances_from_args,
 )
@@ -160,6 +164,11 @@ def test_cli_rejects_unordered_thresholds_before_reading_files(
     assert "volume_far_rel_tol" in error
     assert "must be less than" in error
     assert "Traceback" not in error
+    assert "errors.pydantic.dev" not in error
+    assert "input_value" not in error
+    assert "input_type" not in error
+    if command in ("validate", "batch"):
+        assert f"usage: freecad-validator {command} " in error
     assert list(tmp_path.iterdir()) == []
 
 
@@ -177,6 +186,11 @@ def test_v2_bbox_gate_can_be_tightened_without_a_matched_cli_option(threshold, e
     assert tolerances.bbox_far_rel_tol == threshold
     assert tolerances.bbox_matched_rel_tol == pytest.approx(expected_matched)
     assert tolerances.bbox_matched_rel_tol < tolerances.bbox_far_rel_tol
+    api_tolerances = GeometryTolerances.for_scorer("v2", bbox_far_rel_tol=threshold)
+    assert api_tolerances == tolerances
+    # The version-aware configuration is accepted directly by the public API.
+    validator = Validator(scorer_version="v2", geom_tolerances=api_tolerances)
+    assert validator._geometry_scorer._geom.tolerances == tolerances
 
 
 def test_v1_bbox_override_still_requires_explicitly_ordered_thresholds():
@@ -190,3 +204,82 @@ def test_v1_bbox_override_still_requires_explicitly_ordered_thresholds():
     tolerances = tolerances_from_args(args, scorer_version="v1")
     assert tolerances.bbox_matched_rel_tol == 0.0005
     assert tolerances.bbox_far_rel_tol == 0.005
+
+
+def test_cli_tolerance_fields_match_model():
+    assert set(_TOLERANCE_VERSIONS) == set(GeometryTolerances.model_fields)
+
+
+@pytest.mark.parametrize("command", ["validate", "batch"])
+def test_handlers_work_with_a_freshly_parsed_namespace(tmp_path, monkeypatch, command):
+    result = ValidationResult(
+        geometry_similarity=1.0,
+        cad_spec_consistency=1.0,
+        combined=1.0,
+        geometry_similarity_reason="matched",
+        cad_spec_consistency_reason="matched",
+    )
+    captured = []
+
+    def validator(**kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(combine_method="harmonic", validate=lambda **_paths: result)
+
+    monkeypatch.setattr(cli_module, "Validator", validator)
+    parser = argparse.ArgumentParser()
+    if command == "validate":
+        cli_module._add_validate_args(parser)
+        args = ["candidate.FCStd", "reference.FCStd", "spec.json"]
+    else:
+        case = tmp_path / "data" / "case"
+        case.mkdir(parents=True)
+        for filename in ("candidate.FCStd", "reference.FCStd", "spec.json"):
+            (case / filename).touch()
+        cli_module._add_batch_args(parser)
+        args = ["--sample-data-dir", str(tmp_path)]
+    parsed = parser.parse_args([*args, "--scorer", "v2", "--bbox-far-rel-tol", "0.005"])
+    assert not hasattr(parsed, "geom_tolerances")
+
+    assert getattr(cli_module, f"_run_{command}")(parsed) == 0
+
+    assert len(captured) == 1
+    assert captured[0]["scorer_version"] == "v2"
+    assert captured[0]["geom_tolerances"] == GeometryTolerances.for_scorer(
+        "v2", bbox_far_rel_tol=0.005
+    )
+
+
+def test_scoring_value_error_is_not_reported_as_invalid_cli_options(monkeypatch, capsys):
+    def fail(**_kwargs):
+        raise ValueError("invalid BREP")
+
+    monkeypatch.setattr(cli_module, "Validator", fail)
+    with pytest.raises(ValueError, match="invalid BREP"):
+        cli_main(["validate", "candidate.FCStd", "reference.FCStd", "spec.json"])
+    assert "usage:" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("entrypoint,args", [(cli_main, ["validate"]), (validator_main, [])])
+def test_joint_scorer_help_uses_shared_defaults(monkeypatch, capsys, entrypoint, args):
+    import freecad_validator.validator as validator_module
+
+    monkeypatch.setattr(validator_module, "DEFAULT_SCORER_VERSION", "v1")
+    monkeypatch.setattr(validator_module, "DEFAULT_V2_FAILURE_BUDGET", 7)
+    with pytest.raises(SystemExit) as exc:
+        entrypoint([*args, "--help"])
+    assert exc.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "default: v1" in help_text
+    assert "spec failure budget 7" in help_text
+    assert "independent OCCT bbox gate" in help_text
+
+
+@pytest.mark.parametrize("value", ["0", "nan", "inf"])
+def test_field_validation_errors_name_the_option_without_pydantic_payload(capsys, value):
+    with pytest.raises(SystemExit) as exc:
+        cli_main(["validate", "c.FCStd", "r.FCStd", "s.json", "--volume-far-rel-tol", value])
+    assert exc.value.code == 2
+    error = capsys.readouterr().err
+    assert "volume_far_rel_tol:" in error
+    assert "errors.pydantic.dev" not in error
+    assert "input_value" not in error

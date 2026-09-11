@@ -30,6 +30,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Keep OCP unconditional: each Python version must install its native backend.
+# Its Python 3.13 wheels use cadquery-vtk; older wheels use vtk.
+# V1 and import-only use retain the base Python range.
+v2 = [
+    "cadquery-ocp == 7.8.1.1.post1",
+]
 dev = [
     "pytest >= 7.0",
     "pytest-cov",
@@ -37,10 +43,20 @@ dev = [
     "mypy",
 ]
 # `render` enables the `freecad-validator render` subcommand
-# (rasterize a .FCStd to a PNG). PyVista pulls VTK as a transitive,
-# so keep it opt-in — most validator users don't need rendering.
+# (rasterize a .FCStd to a PNG). PyVista and its VTK dependency stay
+# opt-in; the separate v2 extra also pulls VTK through OCP.
 render = [
     "pyvista >= 0.43",
+]
+
+# Upstream wheel metadata differs by Python version. Describe both variants
+# so uv's universal lockfile does not choose vtk for CPython 3.13.
+[[tool.uv.dependency-metadata]]
+name = "cadquery-ocp"
+version = "7.8.1.1.post1"
+requires-dist = [
+    "vtk == 9.3.1; python_version < '3.13'",
+    "cadquery-vtk == 9.3.1; python_version >= '3.13'",
 ]
 
 [project.urls]

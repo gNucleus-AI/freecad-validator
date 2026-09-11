@@ -19,7 +19,9 @@ jobs:
       - name: install package + dev tools
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install .[dev,v2]
+      - name: verify v2 backend installation
+        run: python -c "from OCP.BRepBndLib import BRepBndLib; assert callable(BRepBndLib.AddOBB_s)"
       - name: lint
         run: ruff check .
 

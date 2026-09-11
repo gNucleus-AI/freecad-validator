@@ -36,7 +36,8 @@ from freecad_validator.fem.schema import (
     STRESS_TOL,
 )
 from freecad_validator.fem.step_interface import DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
-from freecad_validator.scorers.geometry import (
+from freecad_validator.scorers.arguments import (
+    GeometryArgumentError,
     add_tolerance_arguments,
     tolerances_from_args,
 )
@@ -48,9 +49,7 @@ from freecad_validator.scorers.spec_consistency import (
 from freecad_validator.validator import (
     COMBINE_METHODS,
     DEFAULT_COMBINE_METHOD,
-    DEFAULT_SCORER_VERSION,
-    DEFAULT_V2_FAILURE_BUDGET,
-    SCORER_VERSIONS,
+    add_scorer_argument,
     spec_failure_budget_from_args,
 )
 
@@ -67,18 +66,6 @@ def _add_combine_method_argument(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_scorer_argument(p: argparse.ArgumentParser) -> None:
-    """Shared `--scorer` flag for `validate` and `batch`."""
-    p.add_argument(
-        "--scorer",
-        choices=SCORER_VERSIONS,
-        default=DEFAULT_SCORER_VERSION,
-        help="geometry scorer version (default: v2 — property fidelity x "
-        f"face-center-ICP spatial factor, spec failure budget {DEFAULT_V2_FAILURE_BUDGET}; "
-        "v1 retains v0.4 scoring behavior)",
-    )
-
-
 # ---------------------------------------------------------------------------
 # `validate` — score one (candidate, reference, spec) triple
 # ---------------------------------------------------------------------------
@@ -92,7 +79,7 @@ def _add_validate_args(p: argparse.ArgumentParser) -> None:
     add_spec_tolerance_arguments(p)
     add_spec_scoring_arguments(p)
     _add_combine_method_argument(p)
-    _add_scorer_argument(p)
+    add_scorer_argument(p)
     p.add_argument(
         "--json", dest="emit_json", action="store_true", help="emit the result as JSON on stdout"
     )
@@ -100,7 +87,7 @@ def _add_validate_args(p: argparse.ArgumentParser) -> None:
 
 def _run_validate(args: argparse.Namespace) -> int:
     validator = Validator(
-        geom_tolerances=args.geom_tolerances,
+        geom_tolerances=tolerances_from_args(args, scorer_version=args.scorer),
         spec_tolerances=spec_tolerances_from_args(args),
         spec_failure_budget=spec_failure_budget_from_args(args),
         combine_method=args.combine_method,
@@ -150,7 +137,7 @@ def _add_batch_args(p: argparse.ArgumentParser) -> None:
     add_spec_tolerance_arguments(p)
     add_spec_scoring_arguments(p)
     _add_combine_method_argument(p)
-    _add_scorer_argument(p)
+    add_scorer_argument(p)
 
 
 def _stats(values: list[float]) -> dict:
@@ -229,6 +216,8 @@ def _iter_cases(data_dir: Path) -> Iterable[Path]:
 
 
 def _run_batch(args: argparse.Namespace) -> int:
+    # Reject invalid options before inspecting inputs or creating outputs.
+    geom_tolerances = tolerances_from_args(args, scorer_version=args.scorer)
     data_dir = args.sample_data_dir / "data"
     if not data_dir.is_dir():
         print(f"error: {data_dir} is not a directory")
@@ -237,7 +226,7 @@ def _run_batch(args: argparse.Namespace) -> int:
     out_json = args.output_summary or args.sample_data_dir / "validation_summary.json"
 
     validator = Validator(
-        geom_tolerances=args.geom_tolerances,
+        geom_tolerances=geom_tolerances,
         spec_tolerances=spec_tolerances_from_args(args),
         spec_failure_budget=spec_failure_budget_from_args(args),
         combine_method=args.combine_method,
@@ -565,18 +554,18 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
+    command_parsers = {}
     for name, help_text, add_args, run_fn in _SUBCOMMANDS:
         p = sub.add_parser(name, help=help_text)
+        command_parsers[name] = p
         add_args(p)
         p.set_defaults(func=run_fn)
 
     args = parser.parse_args(argv)
-    if args.command in ("validate", "batch"):
-        try:
-            args.geom_tolerances = tolerances_from_args(args, scorer_version=args.scorer)
-        except ValueError as exc:
-            parser.error(str(exc))
-    return args.func(args)
+    try:
+        return args.func(args)
+    except GeometryArgumentError as exc:
+        command_parsers[args.command].error(str(exc))
 
 
 if __name__ == "__main__":
