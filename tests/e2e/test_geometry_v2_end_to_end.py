@@ -9,6 +9,7 @@ when scalars match.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -55,7 +56,7 @@ def make_sketch_pad_box(path: Path, length: float, width: float, height: float) 
         fc.closeDocument(doc.Name)
 
 
-def make_plate_with_hole(path: Path, hole_x: float, hole_y: float) -> Path:
+def make_plate_with_hole(path: Path, hole_x: float, hole_y: float, *, radius: float = 1.5) -> Path:
     """40x30x5 plate with one 3mm-diameter through hole (Compound-shaped
     Body — exercises the `_shape_with_mass` routing for principal moments)."""
     fc = freecad()
@@ -65,7 +66,7 @@ def make_plate_with_hole(path: Path, hole_x: float, hole_y: float) -> Path:
         box = body.newObject("PartDesign::AdditiveBox", "Box")
         box.Length, box.Width, box.Height = 40, 30, 5
         hole = body.newObject("PartDesign::SubtractiveCylinder", "Hole")
-        hole.Radius, hole.Height = 1.5, 5
+        hole.Radius, hole.Height = radius, 5
         hole.Placement = fc.Placement(fc.Vector(hole_x, hole_y, 0), fc.Rotation())
         return _save(doc, path)
     finally:
@@ -92,6 +93,34 @@ def make_moved_box(path: Path, length: float, width: float, height: float) -> Pa
 def test_v2_self_comparison_is_exactly_one(box_10x5x3):
     result = HeuristicGeometryScorerV2().score(str(box_10x5x3), str(box_10x5x3))
     assert result.score == 1.0
+
+
+def test_single_dimension_error_uses_maximum_for_bbox_and_moments(box_10x5x3, tmp_path):
+    candidate = make_box(tmp_path / "box_shorter_height.FCStd", 10, 5, 2.91)
+    result = HeuristicGeometryScorerV2().score(str(box_10x5x3), str(candidate))
+    details = result.details["geom_details"]
+
+    # A 3% height error previously averaged down to the 1% full-score limit.
+    assert details["bbox_rel_diff"] == pytest.approx(0.03)
+    assert result.details["subscores"]["bbox"] == pytest.approx(0.5228787452803376)
+
+    # Independent analytic moments of a uniform box, normalized by V^(5/3).
+    def box_moments(a, b, c):
+        scale = 12.0 * (a * b * c) ** (2.0 / 3.0)
+        return sorted([(b * b + c * c) / scale, (a * a + c * c) / scale, (a * a + b * b) / scale])
+
+    expected_error = max(
+        abs(ref - cand) / max(ref, cand)
+        for ref, cand in zip(box_moments(10, 5, 3), box_moments(10, 5, 2.91), strict=True)
+    )
+    assert details["principal_moments_rel_diff"] == pytest.approx(expected_error)
+    assert result.details["subscores"]["principal_moments"] == pytest.approx(
+        1.0 - math.log10(expected_error / 0.01)
+    )
+
+    legacy = HeuristicGeometryScorer().score(str(box_10x5x3), str(candidate))
+    assert legacy.details["geom_details"]["bbox_rel_diff"] == pytest.approx(0.01)
+    assert legacy.details["subscores"]["bbox"] == pytest.approx(1.0)
 
 
 def test_icp_congruent_different_history_is_exactly_one(box_10x5x3, tmp_path):
@@ -139,6 +168,23 @@ def test_v2_rejects_displaced_small_feature(tmp_path):
     assert icp.score < 0.9
     assert v2.score < v1.score
     assert v2.score < 0.7
+    # Area by type cannot detect a shifted hole; the spatial term must do it.
+    assert v2.details["subscores"]["surface_types"] == 1.0
+
+
+def test_v2_surface_types_detect_small_hole_radius_error(tmp_path):
+    reference = make_plate_with_hole(tmp_path / "radius_ref.FCStd", 13, 10)
+    candidate = make_plate_with_hole(tmp_path / "radius_cand.FCStd", 13, 10, radius=1.455)
+    v2 = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
+    v1 = HeuristicGeometryScorer().score(str(reference), str(candidate))
+
+    # Cylindrical wall area is 2*pi*r*h, hence the 3% radius change is also
+    # a 3% cylindrical area error even though the plate's planar area dominates.
+    details = v2.details["geom_details"]
+    assert details["surface_types_per_type_rel_diff"]["Cylinder"] == pytest.approx(0.03)
+    assert details["surface_types_rel_diff"] == pytest.approx(0.03)
+    assert v2.details["subscores"]["surface_types"] == pytest.approx(0.5228787452803376)
+    assert v1.details["subscores"]["surface_types"] == 1.0
 
 
 def test_v2_rejects_plate_with_missing_hole(tmp_path):
@@ -150,25 +196,18 @@ def test_v2_rejects_plate_with_missing_hole(tmp_path):
     v2 = HeuristicGeometryScorerV2().score(str(reference), str(candidate))
 
     assert icp.score < 0.9
-    assert v2.score < 0.7
+    assert v2.details["subscores"]["surface_types"] == 0.0
+    assert 0.0 < v2.score < 0.7  # A zero surface-type subscore is not a hard gate.
 
 
 def test_v2_penalizes_scaled_copy(box_10x5x3, tmp_path):
-    """A 2x-scaled copy must fail V2 overall.
-
-    The trimmed point-to-point ICP is lenient to nesting fits (a scaled
-    copy's face centers partially nest against the original's), so the icp
-    subscore alone is only a weak signal here — the scalar collapse
-    (volume/area/bbox ~ 0) is what drives the case down. Assert the
-    ensemble outcome, not the icp subscore.
-    """
+    """A 2x-scaled copy must fail the bbox gate before ICP."""
     candidate = make_box(tmp_path / "box_2x.FCStd", 20, 10, 6)
     v2 = HeuristicGeometryScorerV2().score(str(box_10x5x3), str(candidate))
-    subscores = v2.details.get("subscores", {})
-    if subscores:  # face/vertex gates may fire first on some kernels
-        assert subscores["volume"] == 0.0
-        assert subscores["bbox"] == 0.0
-    assert v2.score <= 0.30
+    assert v2.score == 0.0
+    assert v2.details["gate"] == "bbox"
+    assert v2.details["bbox_gate"]["relative_error"] == pytest.approx(0.5)
+    assert "icp_details" not in v2.details
 
 
 # --- principal moments --------------------------------------------------------

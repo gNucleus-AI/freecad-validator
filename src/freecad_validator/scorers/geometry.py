@@ -123,7 +123,7 @@ class HeuristicGeometryScorer(FCStdBaseScorer):
 
 
 def add_tolerance_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register the eight GeometryTolerances knobs as CLI flags.
+    """Register all GeometryTolerances fields as CLI flags.
 
     Each flag defaults to None so callers can detect overrides and pass
     only the explicit ones into `tolerances_from_args`, leaving the rest

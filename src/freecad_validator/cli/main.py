@@ -49,6 +49,7 @@ from freecad_validator.validator import (
     COMBINE_METHODS,
     DEFAULT_COMBINE_METHOD,
     DEFAULT_SCORER_VERSION,
+    DEFAULT_V2_FAILURE_BUDGET,
     SCORER_VERSIONS,
     spec_failure_budget_from_args,
 )
@@ -73,7 +74,7 @@ def _add_scorer_argument(p: argparse.ArgumentParser) -> None:
         choices=SCORER_VERSIONS,
         default=DEFAULT_SCORER_VERSION,
         help="geometry scorer version (default: v2 — property fidelity x "
-        "face-center-ICP spatial factor, spec failure budget 10; "
+        f"face-center-ICP spatial factor, spec failure budget {DEFAULT_V2_FAILURE_BUDGET}; "
         "v1 retains v0.4 scoring behavior)",
     )
 

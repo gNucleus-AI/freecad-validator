@@ -36,6 +36,7 @@ def test_validate_json_is_machine_readable(capsys, box_10x5x3, box_spec):
     payload = json.loads(out)
     assert payload["geometry_similarity"] == pytest.approx(1.0)
     assert 0.0 <= payload["cad_spec_consistency"] <= 1.0
+    assert "failure_budget=10" in payload["cad_spec_consistency_reason"]
     assert 0.0 <= payload["combined"] <= 1.0
 
 

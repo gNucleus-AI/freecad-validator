@@ -44,6 +44,11 @@ def test_failure_budget_score(total_params, failures, expected):
 def test_custom_failure_budget():
     assert _failure_budget_score(total_params=40, failures=5, failure_budget=10) == 0.5
     assert _failure_budget_score(total_params=40, failures=10, failure_budget=10) == 0.0
+    assert _failure_budget_score(total_params=40, failures=1, failure_budget=5) == 0.8
+    assert _failure_budget_score(total_params=40, failures=5, failure_budget=5) == 0.0
+    assert _failure_budget_score(total_params=3, failures=1, failure_budget=5) == pytest.approx(
+        2 / 3
+    )
 
 
 def test_large_failure_budget_does_not_round_a_failure_to_perfect():
@@ -87,7 +92,8 @@ def test_scorer_counts_inconsistent_and_not_found_as_failures(tmp_path):
     assert "failure_budget=disabled" in result.reason
 
 
-def test_scorer_applies_configured_failure_budget(tmp_path):
+@pytest.mark.parametrize(("budget", "expected"), [(None, 0.7), (5, 0.4), (10, 0.7)])
+def test_scorer_applies_configured_failure_budget(tmp_path, budget, expected):
     spec = tmp_path / "spec.json"
     candidate = tmp_path / "candidate.FCStd"
     spec.write_text("{}", encoding="utf-8")
@@ -99,14 +105,19 @@ def test_scorer_applies_configured_failure_budget(tmp_path):
     report.not_found = [_finding(14)]
     report.summary = compute_summary(report)
 
-    scorer = HeuristicSpecConsistencyScorer(failure_budget=10)
+    scorer = (
+        Validator()._spec_scorer
+        if budget is None
+        else HeuristicSpecConsistencyScorer(failure_budget=budget)
+    )
     scorer._checker = SimpleNamespace(check=lambda _spec, _candidate, **_kwargs: report)
     result = scorer.score(str(spec), str(candidate))
 
-    assert result.score == 0.7
-    assert result.details["failure_denominator"] == 10
-    assert result.details["failure_budget"] == 10
-    assert "failure_budget=10" in result.reason
+    assert result.score == expected
+    expected_budget = 10 if budget is None else budget
+    assert result.details["failure_denominator"] == expected_budget
+    assert result.details["failure_budget"] == expected_budget
+    assert f"failure_budget={expected_budget}" in result.reason
 
 
 def test_validator_exposes_default_and_custom_failure_budget():
