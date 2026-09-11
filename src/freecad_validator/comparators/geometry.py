@@ -170,11 +170,9 @@ def _compute_subscores(
         far_tol=tolerances.area_far_rel_tol,
     )
 
-    bbox_rel = _component_rel_diff(
-        list(features_a["bbox_sorted_mm"]),
-        list(features_b["bbox_sorted_mm"]),
-        use_max=use_max_component_error,
-    )
+    bbox_reference = list(features_a["bbox_sorted_mm"])
+    bbox_candidate = list(features_b["bbox_sorted_mm"])
+    bbox_rel = _component_rel_diff(bbox_reference, bbox_candidate, use_max=use_max_component_error)
     bbox_score, bbox_tier = _tier_score(
         bbox_rel,
         matched_tol=tolerances.bbox_matched_rel_tol,
@@ -229,6 +227,8 @@ def _compute_subscores(
         "area_tier": area_tier,
         "bbox_rel_diff": bbox_rel,
         "bbox_tier": bbox_tier,
+        "bbox_reference": bbox_reference,
+        "bbox_candidate": bbox_candidate,
         **types_details,
     }
     if include_principal_moments:
@@ -390,6 +390,39 @@ def _select_shape_and_features(
         return features
     finally:
         FreeCAD.closeDocument(doc.Name)  # type: ignore[attr-defined]
+
+
+def _aligned_bbox_dimensions(
+    fcstd_path: str, rotation: list[list[float]], translation: list[float]
+) -> list[float] | None:
+    """Measure the full solid after a candidate-to-reference rigid transform.
+
+    Transform a copy of the selected Body shape; neither the document nor its
+    saved placement is changed. Face centers and the corners of an existing
+    AABB cannot substitute for the transformed solid's bounds.
+    """
+    from freecad_validator._freecad_loader import import_freecad
+
+    FreeCAD = import_freecad()
+    if not os.path.isfile(fcstd_path):
+        return None
+    doc = FreeCAD.open(fcstd_path)
+    try:
+        doc.recompute()
+        selected_obj = select_scored_body(doc)
+        if selected_obj is None:
+            return None
+        transform = FreeCAD.Matrix()
+        for i in range(3):
+            for j in range(3):
+                setattr(transform, f"A{i + 1}{j + 1}", float(rotation[i][j]))
+            setattr(transform, f"A{i + 1}4", float(translation[i]))
+        shape = selected_obj.Shape.copy()
+        shape.transformShape(transform, False)
+        bbox = shape.BoundBox
+        return sorted([float(bbox.XLength), float(bbox.YLength), float(bbox.ZLength)])
+    finally:
+        FreeCAD.closeDocument(doc.Name)
 
 
 def get_body_mass_properties(fcstd_path: str) -> list[dict]:

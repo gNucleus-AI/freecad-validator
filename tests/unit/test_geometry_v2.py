@@ -122,32 +122,54 @@ def test_bbox_gate_boundary_and_override(monkeypatch, error, threshold, passed):
             "volume_tier": "Matched",
             "area_rel_diff": 0.0,
             "area_tier": "Matched",
-            "bbox_rel_diff": error,
+            "bbox_rel_diff": 0.9,
             "bbox_tier": "Close",
+            "bbox_reference": [100.0, 200.0, 300.0],
+            "bbox_candidate": [10.0, 200.0, 300.0],
             "principal_moments_rel_diff": 0.0,
             "principal_moments_tier": "Matched",
         },
     )
     monkeypatch.setattr(scorer._geom, "compare", lambda *_args: geom_result)
 
+    calls = []
+
     def icp(*_args):
-        assert passed, "BBox rejection must short-circuit ICP"
-        return ComparisonResult(score=1.0, reason="aligned", details={})
+        calls.append("icp")
+        return ComparisonResult(
+            score=1.0,
+            reason="aligned",
+            details={"R": np.eye(3).tolist(), "t": [1.0, 2.0, 3.0]},
+        )
+
+    def aligned_bbox(candidate, rotation, translation):
+        calls.append("bbox")
+        assert candidate == "/tmp/candidate/candidate.FCStd"
+        assert rotation == np.eye(3).tolist()
+        assert translation == [1.0, 2.0, 3.0]
+        return [100.0 * (1.0 - error), 200.0, 300.0]
 
     monkeypatch.setattr(scorer._icp, "compare", icp)
+    monkeypatch.setattr(
+        "freecad_validator.scorers.geometry_v2._aligned_bbox_dimensions", aligned_bbox
+    )
     result = scorer.score("/tmp/reference/reference.FCStd", "/tmp/candidate/candidate.FCStd")
 
     assert result.score == (1.0 if passed else 0.0)
+    assert calls == ["icp", "bbox"]
     assert "/tmp/" not in result.reason
     assert result.details["bbox_gate"] == {
         "passed": passed,
-        "relative_error": error,
+        "relative_error": pytest.approx(error),
         "threshold": threshold,
     }
+    assert result.details["geom_details"]["bbox_frame"] == "icp_aligned"
+    assert result.details["geom_details"]["bbox_unaligned_rel_diff"] == 0.9
+    assert result.details["subscores"]["icp"] == 1.0
     if not passed:
         assert result.details["gated"] is True
         assert result.details["gate"] == "bbox"
-        assert "icp_details" not in result.details
+        assert "icp_details" in result.details
 
 
 def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch):
@@ -178,6 +200,51 @@ def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch):
     assert result.reason == icp_result.reason
     assert result.details["gated"] is True
     assert result.details["icp_details"]["n_faces_candidate"] == 5001
+    assert "bbox_gate" not in result.details
+
+
+@pytest.mark.parametrize("vacuous", [False, True])
+def test_bbox_does_not_use_unaligned_dimensions_when_icp_has_no_pose(monkeypatch, vacuous):
+    from freecad_validator.scorers.geometry_v2 import HeuristicGeometryScorerV2
+
+    scorer = HeuristicGeometryScorerV2()
+    geom_result = ComparisonResult(
+        score=0.0,
+        reason="properties match",
+        details={
+            "subscores": {**{name: 1.0 for name in PROPERTY_SCORE_NAMES}, "bbox": 0.0},
+            "solid_count": 1,
+            "surface_types_rel_diff": 0.0,
+            "surface_types_tier": "Matched",
+            "volume_rel_diff": 0.0,
+            "volume_tier": "Matched",
+            "area_rel_diff": 0.0,
+            "area_tier": "Matched",
+            "bbox_rel_diff": 0.9,
+            "bbox_tier": "Far",
+            "principal_moments_rel_diff": 0.0,
+            "principal_moments_tier": "Matched",
+        },
+    )
+    icp_result = ComparisonResult(
+        score=1.0 if vacuous else 0.0,
+        reason="insufficient face centers" if vacuous else "alignment failed",
+        details={"vacuous_match": True} if vacuous else {},
+    )
+    monkeypatch.setattr(scorer._geom, "compare", lambda *_args: geom_result)
+    monkeypatch.setattr(scorer._icp, "compare", lambda *_args: icp_result)
+    result = scorer.score("reference.FCStd", "candidate.FCStd")
+
+    if vacuous:
+        assert result.score == 1.0
+        assert result.details["bbox_gate"]["passed"] is None
+        assert "relative_error" not in result.details["bbox_gate"]
+        assert result.details["geom_details"]["bbox_frame"] == "unaligned"
+        assert "bbox gate skipped" in result.reason
+    else:
+        assert result.score == 0.0
+        assert result.details["gate"] == "icp"
+        assert "alignment failed" in result.reason
 
 
 def test_v1_feature_extraction_does_not_compute_principal_moments(monkeypatch):
