@@ -18,6 +18,9 @@ from freecad_validator.scorers.arguments import (
 from freecad_validator.scorers.geometry import (
     main as v1_main,
 )
+from freecad_validator.scorers.geometry import (
+    tolerances_from_args as legacy_tolerances_from_args,
+)
 from freecad_validator.scorers.geometry_v2 import main as v2_main
 from freecad_validator.validator import main as validator_main
 
@@ -135,6 +138,28 @@ def test_omitted_options_keep_scorer_defaults(version):
     parser = argparse.ArgumentParser()
     add_tolerance_arguments(parser)
     assert tolerances_from_args(parser.parse_args([]), scorer_version=version) is None
+
+
+def test_legacy_tolerance_helper_keeps_single_argument_and_original_defaults():
+    assert legacy_tolerances_from_args(argparse.Namespace()) is None
+    overrides = dict(bbox_matched_rel_tol=0.02, principal_moments_far_rel_tol=0.2)
+    assert legacy_tolerances_from_args(argparse.Namespace(**overrides)) == GeometryTolerances(
+        **overrides
+    )
+    # Legacy calls validate the supplied values without V2's derived threshold.
+    with pytest.raises(ValueError, match="bbox_matched_rel_tol.*must be less than"):
+        legacy_tolerances_from_args(argparse.Namespace(bbox_far_rel_tol=0.005))
+
+
+def test_legacy_helper_explicit_version_uses_shared_cli_rules():
+    args = argparse.Namespace(bbox_far_rel_tol=0.005)
+    assert legacy_tolerances_from_args(args, scorer_version="v2") == tolerances_from_args(
+        args, scorer_version="v2"
+    )
+    with pytest.raises(ValueError, match="not supported by scorer v2"):
+        legacy_tolerances_from_args(
+            argparse.Namespace(bbox_matched_rel_tol=0.02), scorer_version="v2"
+        )
 
 
 @pytest.mark.parametrize("version", ["v1", "v2"])

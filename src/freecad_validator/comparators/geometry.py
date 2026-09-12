@@ -21,10 +21,13 @@ from typing import Any, Self
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from freecad_validator import _freecad_loader
+
 # ``FreeCAD`` is imported lazily inside the functions that open a
 # document, so the package can be imported on hosts that haven't
 # installed FreeCAD yet. The import error only fires when the user
 # actually tries to score a case.
+from . import occt_bbox
 from .base import ComparisonResult, FCStdBaseComparator
 from .integrity_gates import (
     partdesign_body_gate,
@@ -418,9 +421,7 @@ def _select_shape_and_features(
     PartDesign feature-tree requirements.
     """
     try:
-        from freecad_validator._freecad_loader import import_freecad
-
-        FreeCAD = import_freecad()
+        FreeCAD = _freecad_loader.import_freecad()
     except ImportError:
         logging.error("FreeCAD is not available")
         return None
@@ -464,9 +465,7 @@ def get_body_mass_properties(fcstd_path: str) -> list[dict]:
     Returns an empty list when FreeCAD is unavailable, the path is invalid, or open fails.
     """
     try:
-        from freecad_validator._freecad_loader import import_freecad
-
-        FreeCAD = import_freecad()
+        FreeCAD = _freecad_loader.import_freecad()
     except ImportError:
         logging.error("FreeCAD is not available")
         return []
@@ -561,9 +560,7 @@ class GeometryComparator(FCStdBaseComparator):
         does NOT contain a `subscores` key.
         """
         try:
-            from freecad_validator._freecad_loader import import_freecad
-
-            import_freecad()
+            _freecad_loader.import_freecad()
         except ImportError:
             return ComparisonResult(score=0.0, reason="FreeCAD API is not available")
 
@@ -673,12 +670,18 @@ class GeometryComparator(FCStdBaseComparator):
             )
 
         if self.use_oriented_bbox:
-            from .occt_bbox import oriented_bbox_dimensions
-
             # Reuse geometry extracted during the existing document opens.
             # Keep BREP payloads out of the returned score details.
-            for features in (features_a, features_b):
-                features["bbox_sorted_mm"] = oriented_bbox_dimensions(features.pop("brep"))
+            for role, name, features in (
+                ("reference", reference_name, features_a),
+                ("candidate", candidate_name, features_b),
+            ):
+                try:
+                    features["bbox_sorted_mm"] = occt_bbox.oriented_bbox_dimensions(
+                        features.pop("brep")
+                    )
+                except occt_bbox.OBBMeasurementError as exc:
+                    raise occt_bbox.OBBMeasurementError(f"{role} model '{name}': {exc}") from exc
 
         subscores, details = _compute_subscores(
             features_a,

@@ -49,6 +49,11 @@ from freecad_validator.comparators.geometry import (
     GeometryTolerances,
 )
 from freecad_validator.comparators.icp import FaceCenterICPComparator
+from freecad_validator.comparators.occt_bbox import (
+    OBBMeasurementError,
+    OCCTUnavailableError,
+    ensure_ocp_available,
+)
 from freecad_validator.scorers.arguments import (
     add_tolerance_arguments,
     tolerances_from_args,
@@ -133,6 +138,7 @@ class HeuristicGeometryScorerV2(FCStdBaseScorer):
     name = "heuristic_geometry_v2"
 
     def __init__(self, tolerances: GeometryTolerances | None = None):
+        ensure_ocp_available()
         self._icp = FaceCenterICPComparator()
         self._geom = GeometryComparator(
             tolerances=tolerances,
@@ -235,11 +241,15 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    scorer = HeuristicGeometryScorerV2(tolerances=tolerances)
-    result = scorer.score(
-        os.path.abspath(args.reference_fcstd),
-        os.path.abspath(args.candidate_fcstd),
-    )
+    try:
+        scorer = HeuristicGeometryScorerV2(tolerances=tolerances)
+        result = scorer.score(
+            os.path.abspath(args.reference_fcstd),
+            os.path.abspath(args.candidate_fcstd),
+        )
+    except (OCCTUnavailableError, OBBMeasurementError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     logging.info("Comparison Score: %s", result.score)
     logging.info("Comparison Reason: %s", result.reason)
     return 0

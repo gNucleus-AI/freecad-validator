@@ -14,7 +14,7 @@ from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCone
 from OCP.BRepTools import BRepTools
 from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf
 
-from freecad_validator.comparators.occt_bbox import oriented_bbox_dimensions
+from freecad_validator.comparators.occt_bbox import OBBMeasurementError, oriented_bbox_dimensions
 
 
 def _brep(shape):
@@ -40,5 +40,18 @@ def test_native_obb_detects_scale_without_three_face_centers():
 
 
 def test_native_obb_rejects_empty_brep():
-    with pytest.raises(ValueError, match="empty BREP"):
+    with pytest.raises(OBBMeasurementError, match="empty BREP"):
         oriented_bbox_dimensions("")
+
+
+def test_native_meshing_exception_is_a_measurement_error(monkeypatch):
+    brep = _brep(BRepPrimAPI_MakeBox(1, 2, 3).Shape())
+    failure = RuntimeError("native meshing failed")
+
+    def fail(*args):
+        raise failure
+
+    monkeypatch.setattr("OCP.BRepMesh.BRepMesh_IncrementalMesh", fail)
+    with pytest.raises(OBBMeasurementError, match="native meshing failed") as exc:
+        oriented_bbox_dimensions(brep)
+    assert exc.value.__cause__ is failure

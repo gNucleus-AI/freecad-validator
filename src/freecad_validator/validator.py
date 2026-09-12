@@ -41,6 +41,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from freecad_validator.comparators.geometry import GeometryTolerances
+from freecad_validator.comparators.occt_bbox import OBBMeasurementError, OCCTUnavailableError
 from freecad_validator.consistency.checker import SpecTolerances
 from freecad_validator.scorers.arguments import (
     add_tolerance_arguments,
@@ -232,18 +233,22 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    validator = HeuristicValidator(
-        geom_tolerances=geom_tolerances,
-        spec_tolerances=spec_tolerances_from_args(args),
-        spec_failure_budget=spec_failure_budget_from_args(args),
-        combine_method=args.combine_method,
-        scorer_version=args.scorer,
-    )
-    result = validator.validate(
-        candidate_fcstd=args.candidate_fcstd,
-        reference_fcstd=args.reference_fcstd,
-        spec_json=args.spec_json,
-    )
+    try:
+        validator = HeuristicValidator(
+            geom_tolerances=geom_tolerances,
+            spec_tolerances=spec_tolerances_from_args(args),
+            spec_failure_budget=spec_failure_budget_from_args(args),
+            combine_method=args.combine_method,
+            scorer_version=args.scorer,
+        )
+        result = validator.validate(
+            candidate_fcstd=args.candidate_fcstd,
+            reference_fcstd=args.reference_fcstd,
+            spec_json=args.spec_json,
+        )
+    except (OCCTUnavailableError, OBBMeasurementError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     if args.emit_json:
         logging.info(json.dumps(result.model_dump(), indent=2))

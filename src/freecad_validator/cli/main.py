@@ -28,6 +28,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from freecad_validator import Validator
+from freecad_validator.comparators.occt_bbox import OBBMeasurementError, OCCTUnavailableError
 from freecad_validator.fem import FEMValidator
 from freecad_validator.fem.schema import (
     DISP_TOL,
@@ -200,6 +201,8 @@ def _validate_one(case_dir: Path, validator: Validator) -> tuple[str, dict]:
             reference_fcstd=str(reference),
             spec_json=str(spec_json),
         )
+    except OCCTUnavailableError:
+        raise
     except Exception as exc:
         return cid, {"error": f"{type(exc).__name__}: {exc}"}
     return cid, {
@@ -566,6 +569,9 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except GeometryArgumentError as exc:
         command_parsers[args.command].error(str(exc))
+    except (OCCTUnavailableError, OBBMeasurementError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

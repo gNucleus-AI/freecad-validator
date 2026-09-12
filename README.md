@@ -6,7 +6,7 @@ solved FreeCAD/CalculiX FEM analyses. Reproducible, no LLM, no GPU.
 ## Prerequisites
 
 * Python ≥ 3.11
-  (v2's pinned OCP binary dependencies provide Python 3.11–3.13 wheels).
+  (v2's pinned OCP binary dependencies provide Python 3.11–3.14 wheels).
 * [FreeCAD](https://www.freecad.org/) **1.1.0 recommended**. FreeCAD
   **0.21.x remains supported for non-FEM validation**, but FEM
   validation requires FreeCAD 1.1.0.
@@ -120,17 +120,37 @@ pip install 'gnucleus-freecad-validator[v2]'
 ```
 
 The default v2 scorer uses OCCT's native oriented bounding box through
-`cadquery-ocp==7.8.1.1.post1`. It provides wheels for Python 3.11–3.13 on
-macOS arm64/x86_64, Linux x86_64, and Windows x86_64. Python 3.11/3.12
-wheels depend on `vtk==9.3.1`; Python 3.13 wheels use `cadquery-vtk==9.3.1`.
-The pinned binding does not provide Linux aarch64 wheels. Install the extra
-in the same interpreter that loads FreeCAD. Missing OCP is a scoring error;
-the validator does not silently disable the bbox gate. The extra always
+[`cadquery-ocp==7.9.3.1.1`](https://pypi.org/project/cadquery-ocp/7.9.3.1.1/#files).
+It provides wheels for Python 3.11–3.14 on macOS arm64/x86_64,
+Linux aarch64/x86_64 (glibc 2.31+), and Windows x86_64. Its dependencies
+include `cadquery-ocp-proxy==7.9.3.1.1` and `vtk==9.6.2`.
+Install the extra in the same interpreter that loads FreeCAD. The extra always
 requires the pinned backend: on unsupported Python versions, installation
 fails to resolve its dependencies instead of succeeding without OCP.
-The uv lockfile records the Python-specific VTK dependency variants.
 FreeCAD's binding must also match the Python interpreter; the FreeCAD 1.1.0
 bundle used for end-to-end validation here embeds Python 3.11.
+
+For slim Debian/Ubuntu containers, install the shared libraries used by
+OCP/VTK before installing the v2 extra. Add this to the Dockerfile:
+
+```dockerfile
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+These runtime libraries are needed even for headless scoring; a display
+server is not required. Missing libraries can cause `import OCP` to fail
+with an error such as `ImportError: libGL.so.1`.
+
+Constructing a v2 `Validator` or geometry scorer checks the native dependencies
+before reading models. Missing OCP or shared libraries raise
+`OCCTUnavailableError`; an OCCT measurement failure raises `OBBMeasurementError`
+(both in `freecad_validator.comparators.occt_bbox`). Single-case CLIs report
+these errors on stderr and exit with status 1. Batch scoring stops with status 1
+on an unavailable backend; an individual measurement failure is recorded as an
+error, excluded from score averages, and processing continues. Neither failure becomes a zero
+score or disables the bbox gate.
 
 For v1 scoring or other APIs, `pip install gnucleus-freecad-validator`
 retains the base dependency set. Select v1 explicitly with `--scorer v1`

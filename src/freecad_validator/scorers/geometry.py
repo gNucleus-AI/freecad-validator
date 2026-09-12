@@ -43,7 +43,7 @@ from freecad_validator.scorers.arguments import (
     add_tolerance_arguments as add_tolerance_arguments,
 )
 from freecad_validator.scorers.arguments import (
-    tolerances_from_args as tolerances_from_args,
+    tolerances_from_args as _versioned_tolerances_from_args,
 )
 from freecad_validator.scorers.base import FCStdBaseScorer
 
@@ -53,6 +53,24 @@ COMPARATOR_WEIGHTS = {
     "surface_area": 0.40,
     "bbox": 0.15,
 }
+
+
+def tolerances_from_args(
+    args: argparse.Namespace, *, scorer_version: str | None = None
+) -> GeometryTolerances | None:
+    """Preserve the original one-argument helper's configuration semantics.
+
+    Explicit versions use the shared CLI applicability checks. Legacy callers
+    keep direct GeometryTolerances defaults and validation, with no derivation.
+    """
+    if scorer_version is not None:
+        return _versioned_tolerances_from_args(args, scorer_version=scorer_version)
+    overrides = {
+        name: getattr(args, name)
+        for name in GeometryTolerances.model_fields
+        if getattr(args, name, None) is not None
+    }
+    return GeometryTolerances(**overrides) if overrides else None
 
 
 def combine_subscores(
