@@ -300,6 +300,10 @@ def _measure_plane_pairs(shape) -> list[SpatialFeature]:
                 if volume <= 1e-9:
                     continue
                 occupied = shape.common(prism).Volume / volume
+                # Keep the 1e-6 minority-volume cutoff strict: relaxing it can
+                # hide a real thin obstruction or cavity between these walls.
+                # This is a classification tolerance, not a universal bound on
+                # OCCT boolean error; near-boundary geometry needs native controls.
                 region = (
                     "void" if occupied < 1e-6 else "material" if occupied > 1 - 1e-6 else "mixed"
                 )
@@ -482,20 +486,21 @@ def extract_spatial(shape, *, include_plane_pairs: bool = True) -> SpatialBank:
         limitations.append(f"{PLANE_PAIR_UNAVAILABLE}: disabled")
     for feature in features:
         feature.coincident_order = coincident_order(feature, features, scale=feature.scale)
+    center = shape.CenterOfMass
+
+    # Intrinsic keys and complete tie classes prevent arbitrary face order
+    # or world-axis bounds from selecting different landmarks after rotation.
+    def landmark_key(f):
+        return (
+            -round(f.area, 5),
+            -round(f.scale, 5),
+            round(math.dist(f.position, center), 5),
+            f.convex,
+        )
+
     landmarks = []
     for kind, limit in (("plane", 24), ("cylinder", 32), ("line", 8)):
         candidates = [f for f in features if f.kind == kind]
-
-        # Intrinsic keys and complete tie classes prevent arbitrary face order
-        # or world-axis bounds from selecting different landmarks after rotation.
-        def landmark_key(f):
-            return (
-                -round(f.area, 5),
-                -round(f.scale, 5),
-                round(math.dist(f.position, shape.CenterOfMass), 5),
-                f.convex,
-            )
-
         candidates.sort(key=landmark_key)
         selected = []
         for _, tied in itertools.groupby(candidates, key=landmark_key):

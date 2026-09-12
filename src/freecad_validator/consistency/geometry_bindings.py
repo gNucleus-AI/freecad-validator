@@ -4,6 +4,9 @@ A binding is trusted task data, chosen before seeing candidates. Registration
 uses a common geometric datum; witness matching uses type, material side,
 position and direction, never the requested parameter value. A missing witness
 cannot be rescued by the legacy scalar pool. All parameters remain in scoring.
+Witness scales must come from reference geometry, not candidate input or tuning
+to obtain a match: they set the positional tolerance. The schema checks that a
+scale is finite and positive; it cannot establish its geometric provenance.
 """
 
 from __future__ import annotations
@@ -361,13 +364,7 @@ def apply_bindings(
         unavailable_reason = "Candidate has no supported spatial landmarks for the binding datum"
     if geometric and bank is None and unavailable_reason is None:
         raise GeometryBindingError("V2 geometry bindings require a spatial measurement bank")
-    if geometric and bank is not None:
-        rotation, translation, fit = align_datum(bindings.datum, bank.datum)
-        details["alignment"] = {
-            "rotation": rotation.tolist(),
-            "translation": translation.tolist(),
-            "landmark_fit_mm": fit,
-        }
+    alignment = None
     for key, binding in bindings.parameters.items():
         if binding.mode == "legacy":
             details["parameters"][key] = {"mode": "legacy", "reason": binding.reason}
@@ -377,6 +374,15 @@ def apply_bindings(
         if bank is None:
             bucket, values, evidence, reason = "not_found", None, [], unavailable_reason
         else:
+            if alignment is None:
+                alignment = align_datum(bindings.datum, bank.datum)
+                rotation, translation, fit = alignment
+                details["alignment"] = {
+                    "rotation": rotation.tolist(),
+                    "translation": translation.tolist(),
+                    "landmark_fit_mm": fit,
+                }
+            rotation, translation, _ = alignment
             bucket, values, evidence, reason = evaluate_binding(
                 binding,
                 float(expected[key]),

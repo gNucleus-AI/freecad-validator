@@ -71,6 +71,55 @@ def test_plane_pair_reports_actual_material_and_void_support():
     assert any(f.region == "void" and abs(f.values["separation"] - 10) < 1e-6 for f in pairs)
 
 
+@pytest.mark.parametrize("region", ["material", "void"])
+@pytest.mark.parametrize("minority_fraction", [0, 5e-7, 2e-6, 2e-5])
+@pytest.mark.parametrize("moved", [False, True])
+def test_wall_region_cutoff_preserves_small_physical_features(region, minority_fraction, moved):
+    App = import_freecad()
+    Part = importlib.import_module("Part")
+    shape = Part.makeBox(30, 20, 10)
+    if region == "material":
+        prism = shape.copy()
+        separation = 30
+    else:
+        prism = Part.makeBox(10, 20, 7, App.Vector(10, 0, 3))
+        shape = shape.cut(prism)
+        separation = 10
+    if minority_fraction:
+        # An off-center cavity or floor-attached rib misses the centroid probes.
+        # Its real volume tests the boolean classification on both sides of the
+        # cutoff; a 1e-4 relaxation would incorrectly retain the mixed supports.
+        thickness = minority_fraction * prism.Volume / 5
+        base = App.Vector(2, 2, 2) if region == "material" else App.Vector(12, 2, 3)
+        defect = Part.makeBox(1, thickness, 5, base)
+        shape = shape.cut(defect) if region == "material" else shape.fuse(defect)
+    direction = App.Vector(1, 0, 0)
+    if moved:
+        rotation = App.Rotation(App.Vector(1, 2, 3), 37)
+        direction = rotation.multVec(direction)
+        for solid in (shape, prism):
+            solid.rotate(App.Vector(), App.Vector(1, 2, 3), 37)
+            solid.translate(App.Vector(123, -97, 41))
+    assert shape.isValid() and len(shape.Solids) == 1
+    occupied = shape.common(prism).Volume / prism.Volume
+    measured_fraction = 1 - occupied if region == "material" else occupied
+    assert measured_fraction == pytest.approx(minority_fraction, abs=1e-10)
+    bank = extract_spatial(shape)
+    assert not bank.limitations
+    supports = [
+        f
+        for f in bank.features
+        if f.kind == "plane_pair"
+        and abs(f.values["separation"] - separation) < 1e-6
+        and abs(np.dot(f.direction, tuple(direction))) > 1 - 1e-7
+        and np.linalg.norm(np.asarray(f.position) - tuple(prism.CenterOfMass)) < 1e-6
+    ]
+    if minority_fraction < 1e-6:
+        assert len(supports) == 1 and supports[0].region == region
+    else:
+        assert not supports
+
+
 @pytest.mark.parametrize("reason", ["disabled", "timeout"])
 def test_unfinished_native_wall_pairs_are_explicitly_unavailable(monkeypatch, reason):
     import_freecad()
