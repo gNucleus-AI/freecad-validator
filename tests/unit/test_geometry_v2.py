@@ -169,7 +169,8 @@ def test_bbox_gate_boundary_and_override(monkeypatch, error, threshold, passed):
         assert "icp_details" not in result.details
 
 
-def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch):
+@pytest.mark.parametrize("gate", [None, "complexity", "face_count", "vertex_count"])
+def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch, gate):
     from freecad_validator.scorers.geometry_v2 import HeuristicGeometryScorerV2
 
     scorer = HeuristicGeometryScorerV2()
@@ -178,12 +179,15 @@ def test_v2_propagates_icp_gate_instead_of_applying_spatial_floor(monkeypatch):
         reason="candidate exceeds ICP complexity ceiling",
         details={"gated": True, "n_faces_candidate": 5001},
     )
+    if gate is not None:
+        icp_result.details["gate"] = gate
     monkeypatch.setattr(scorer._geom, "compare", lambda *_args: _geometry_result())
     monkeypatch.setattr(scorer._icp, "compare", lambda *_args: icp_result)
     result = scorer.score("reference.FCStd", "candidate.FCStd")
     assert result.score == 0.0
     assert result.reason == icp_result.reason
     assert result.details["gated"] is True
+    assert result.details["gate"] == (gate or "icp")
     assert result.details["icp_details"]["n_faces_candidate"] == 5001
     assert result.details["bbox_gate"]["passed"] is True
 
@@ -213,6 +217,38 @@ def test_icp_loading_failure_is_explicitly_gated(monkeypatch):
     result = FaceCenterICPComparator().compare("reference.FCStd", "candidate.FCStd")
     assert result.score == 0.0
     assert result.details["gated"] is True
+
+
+@pytest.mark.parametrize("comparator", ["geometry", "icp"])
+@pytest.mark.parametrize(
+    "faces,vertices,gate",
+    [(5001, 8, "complexity"), (20, 8, "face_count"), (6, 30, "vertex_count")],
+)
+def test_complexity_and_topology_rejections_identify_the_gate(
+    monkeypatch, comparator, faces, vertices, gate
+):
+    def features(path, **kwargs):
+        candidate = path == "candidate.FCStd"
+        n_faces, n_vertices = (faces, vertices) if candidate else (6, 8)
+        return dict(
+            solid_count=1,
+            n_faces=n_faces,
+            n_vertices=n_vertices,
+            centers=np.zeros((n_faces, 3)),
+            areas=np.ones(n_faces),
+        )
+
+    if comparator == "geometry":
+        monkeypatch.setattr("freecad_validator._freecad_loader.import_freecad", lambda: object())
+        monkeypatch.setattr(geometry_comparator, "_select_shape_and_features", features)
+        scorer = geometry_comparator.GeometryComparator(max_candidate_faces=5000)
+    else:
+        monkeypatch.setattr("freecad_validator.comparators.icp._face_features", features)
+        scorer = FaceCenterICPComparator()
+    result = scorer.compare("reference.FCStd", "candidate.FCStd")
+    assert result.score == 0.0
+    assert result.details["gated"] is True
+    assert result.details["gate"] == gate
 
 
 @pytest.mark.parametrize("face_count", [5000, 5001])

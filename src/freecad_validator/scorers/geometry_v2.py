@@ -196,7 +196,7 @@ class HeuristicGeometryScorerV2(FCStdBaseScorer):
             return ComparisonResult(
                 score=0.0,
                 reason=icp_result.reason,
-                details={**details, "gated": True},
+                details={**details, "gated": True, "gate": icp_result.details.get("gate", "icp")},
             )
         overall = combine_subscores_v2(subscores)
         reason = _format_reason(

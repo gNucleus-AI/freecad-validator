@@ -284,23 +284,50 @@ def test_v2_does_not_reopen_candidate_for_bbox(box_10x5x3, monkeypatch):
     assert len(calls) == 4
 
 
-def test_v2_checks_native_face_count_before_obb(box_10x5x3, monkeypatch):
+@pytest.mark.parametrize("face_limit", [5, 6])
+def test_v2_checks_native_face_count_before_brep_and_obb(box_10x5x3, monkeypatch, face_limit):
     # Lower the policy limit to exercise the real FreeCAD extraction cheaply.
     # The unit test separately covers the production 5000/5001 boundary.
-    monkeypatch.setattr(FaceCenterICPComparator, "MAX_CANDIDATE_FACES", 5)
+    monkeypatch.setattr(FaceCenterICPComparator, "MAX_CANDIDATE_FACES", face_limit)
+    exported = []
+    original_features = geometry_comparator._shape_features
+
+    class TrackedShape:
+        def __init__(self, shape):
+            self.shape = shape
+
+        def __getattr__(self, name):
+            return getattr(self.shape, name)
+
+        def exportBrepToString(self):
+            exported.append(len(self.shape.Faces))
+            return self.shape.exportBrepToString()
+
+    def tracked_features(shape, **kwargs):
+        return original_features(TrackedShape(shape), **kwargs)
+
+    monkeypatch.setattr(geometry_comparator, "_shape_features", tracked_features)
 
     def unexpected_obb(_brep):
         raise AssertionError("An over-limit candidate must not reach OBB meshing")
 
-    monkeypatch.setattr(
-        "freecad_validator.comparators.occt_bbox.oriented_bbox_dimensions", unexpected_obb
-    )
+    if face_limit == 5:
+        monkeypatch.setattr(
+            "freecad_validator.comparators.occt_bbox.oriented_bbox_dimensions", unexpected_obb
+        )
     result = HeuristicGeometryScorerV2().score(str(box_10x5x3), str(box_10x5x3))
-    assert result.score == 0.0
-    assert result.details["gate"] == "complexity"
-    assert result.details["n_faces_candidate"] == 6
-    assert result.details["max_candidate_faces"] == 5
+    if face_limit == 5:
+        assert result.score == 0.0
+        assert result.details["gate"] == "complexity"
+        assert result.details["n_faces_candidate"] == 6
+        assert result.details["max_candidate_faces"] == 5
+        assert exported == [6]  # Only the reference was serialized.
+    else:
+        assert result.score == 1.0
+        assert exported == [6, 6]
+    exported.clear()
     assert HeuristicGeometryScorer().score(str(box_10x5x3), str(box_10x5x3)).score == 1.0
+    assert exported == []
 
 
 def test_icp_accepts_symmetric_pose(tmp_path):
