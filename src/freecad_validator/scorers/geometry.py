@@ -37,6 +37,14 @@ from freecad_validator.comparators.geometry import (
     GeometryComparator,
     GeometryTolerances,
 )
+
+# Keep the existing helper imports available to callers of this module.
+from freecad_validator.scorers.arguments import (
+    add_tolerance_arguments as add_tolerance_arguments,
+)
+from freecad_validator.scorers.arguments import (
+    tolerances_from_args as _versioned_tolerances_from_args,
+)
 from freecad_validator.scorers.base import FCStdBaseScorer
 
 COMPARATOR_WEIGHTS = {
@@ -45,6 +53,24 @@ COMPARATOR_WEIGHTS = {
     "surface_area": 0.40,
     "bbox": 0.15,
 }
+
+
+def tolerances_from_args(
+    args: argparse.Namespace, *, scorer_version: str | None = None
+) -> GeometryTolerances | None:
+    """Preserve the original one-argument helper's configuration semantics.
+
+    Explicit versions use the shared CLI applicability checks. Legacy callers
+    keep direct GeometryTolerances defaults and validation, with no derivation.
+    """
+    if scorer_version is not None:
+        return _versioned_tolerances_from_args(args, scorer_version=scorer_version)
+    overrides = {
+        name: getattr(args, name)
+        for name in GeometryTolerances.model_fields
+        if getattr(args, name, None) is not None
+    }
+    return GeometryTolerances(**overrides) if overrides else None
 
 
 def combine_subscores(
@@ -122,38 +148,6 @@ class HeuristicGeometryScorer(FCStdBaseScorer):
         )
 
 
-def add_tolerance_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register the eight GeometryTolerances knobs as CLI flags.
-
-    Each flag defaults to None so callers can detect overrides and pass
-    only the explicit ones into `tolerances_from_args`, leaving the rest
-    on their pydantic defaults.
-    """
-    defaults = GeometryTolerances()
-    group = parser.add_argument_group("geometry tolerances")
-    for field_name in GeometryTolerances.model_fields:
-        cli_flag = f"--{field_name.replace('_', '-')}"
-        group.add_argument(
-            cli_flag,
-            type=float,
-            default=None,
-            help=(f"override {field_name} (default: {getattr(defaults, field_name)})"),
-        )
-
-
-def tolerances_from_args(args: argparse.Namespace) -> GeometryTolerances | None:
-    """Build a GeometryTolerances from argparse, or return None when no
-    tolerance flag was overridden (so the comparator uses its defaults)."""
-    overrides = {
-        name: getattr(args, name)
-        for name in GeometryTolerances.model_fields
-        if getattr(args, name, None) is not None
-    }
-    if not overrides:
-        return None
-    return GeometryTolerances(**overrides)
-
-
 def main(argv: list[str] | None = None) -> int:
     """CLI: compute the heuristic geometry similarity score between two
     FreeCAD parts. Runs GeometryComparator on the reference and candidate
@@ -169,12 +163,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("reference_fcstd", help="Reference .FCStd path (ground truth)")
     parser.add_argument("candidate_fcstd", help="Candidate .FCStd path to compare")
-    add_tolerance_arguments(parser)
+    add_tolerance_arguments(parser, scorer_version="v1")
     args = parser.parse_args(argv)
+    try:
+        tolerances = tolerances_from_args(args, scorer_version="v1")
+    except ValueError as exc:
+        parser.error(str(exc))
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    scorer = HeuristicGeometryScorer(tolerances=tolerances_from_args(args))
+    scorer = HeuristicGeometryScorer(tolerances=tolerances)
     result = scorer.score(
         os.path.abspath(args.reference_fcstd),
         os.path.abspath(args.candidate_fcstd),

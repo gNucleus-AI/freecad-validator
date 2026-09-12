@@ -36,6 +36,7 @@ def test_validate_json_is_machine_readable(capsys, box_10x5x3, box_spec):
     payload = json.loads(out)
     assert payload["geometry_similarity"] == pytest.approx(1.0)
     assert 0.0 <= payload["cad_spec_consistency"] <= 1.0
+    assert "failure_budget=10" in payload["cad_spec_consistency_reason"]
     assert 0.0 <= payload["combined"] <= 1.0
 
 
@@ -61,7 +62,8 @@ def test_combine_method_flag_is_applied(capsys, box_10x5x3, box_20x5x3, box_spec
     )
 
 
-def test_tolerance_flag_is_accepted(capsys, box_10x5x3, box_20x5x3, box_spec):
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_tolerance_flag_is_accepted(capsys, box_10x5x3, box_20x5x3, box_spec, version):
     """Loosening the volume tolerance must not crash the arg wiring."""
     out = _run(
         capsys,
@@ -70,7 +72,41 @@ def test_tolerance_flag_is_accepted(capsys, box_10x5x3, box_20x5x3, box_spec):
         str(box_10x5x3),
         str(box_spec),
         "--json",
+        "--scorer",
+        version,
         "--volume-far-rel-tol",
         "5.0",
     )
     assert 0.0 <= json.loads(out)["geometry_similarity"] <= 1.0
+
+
+def test_v2_bbox_rejection_threshold_override_is_applied(capsys, box_10x5x3, box_20x5x3, box_spec):
+    args = ["validate", str(box_20x5x3), str(box_10x5x3), str(box_spec), "--json"]
+    default = json.loads(_run(capsys, *args))
+    relaxed = json.loads(_run(capsys, *args, "--bbox-far-rel-tol", "0.6"))
+
+    assert "gated geometry to 0.0" in default["geometry_similarity_reason"]
+    assert "gate passed" in relaxed["geometry_similarity_reason"]
+
+
+def test_v2_cli_accepts_bbox_gate_below_one_percent(capsys, box_10x5x3, box_20x5x3, box_spec):
+    def score(candidate):
+        return json.loads(
+            _run(
+                capsys,
+                "validate",
+                str(candidate),
+                str(box_10x5x3),
+                str(box_spec),
+                "--bbox-far-rel-tol",
+                "0.005",
+                "--json",
+            )
+        )
+
+    identical = score(box_10x5x3)
+    different = score(box_20x5x3)
+    assert identical["geometry_similarity"] == pytest.approx(1.0)
+    assert "gate passed" in identical["geometry_similarity_reason"]
+    assert different["geometry_similarity"] == 0.0
+    assert "gated geometry to 0.0" in different["geometry_similarity_reason"]

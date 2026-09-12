@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gnucleus-freecad-validator"
-version = "0.5.0"
+version = "0.6.0"
 description = "Deterministic validation for FreeCAD geometry, design specifications, and solved FreeCAD/CalculiX FEM analyses."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,6 +30,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Keep OCP unconditional: each Python version must install its native backend.
+# V1 and import-only use retain the base Python range.
+v2 = [
+    "cadquery-ocp == 7.9.3.1.1",
+]
 dev = [
     "pytest >= 7.0",
     "pytest-cov",
@@ -37,8 +42,8 @@ dev = [
     "mypy",
 ]
 # `render` enables the `freecad-validator render` subcommand
-# (rasterize a .FCStd to a PNG). PyVista pulls VTK as a transitive,
-# so keep it opt-in — most validator users don't need rendering.
+# (rasterize a .FCStd to a PNG). PyVista and its VTK dependency stay
+# opt-in; the separate v2 extra also pulls VTK through OCP.
 render = [
     "pyvista >= 0.43",
 ]

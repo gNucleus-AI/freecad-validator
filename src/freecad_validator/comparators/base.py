@@ -42,4 +42,8 @@ class FCStdBaseComparator(ABC):
     def compare(self, reference_fcstd: str, candidate_fcstd: str) -> ComparisonResult:
         """Compare candidate against reference. Must not raise on missing
         files — return a ComparisonResult with score=0 and an explanatory
-        reason instead, so batch runners can surface partial failures."""
+        reason instead, so batch runners can surface partial failures.
+        Backend unavailability or measurement failures may raise explicit
+        errors (for example, OCCTUnavailableError or OBBMeasurementError);
+        these must not be reported as a candidate's zero score.
+        """
