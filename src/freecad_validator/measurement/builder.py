@@ -11,8 +11,8 @@ pull from:
   - feature tree (named scalar properties + sketch Geometry reads)
   - linear-pattern and circular-pattern detection (derived from above)
 
-Per-edge primitives are deferred — not yet needed by the classifier
-paths exercised on the current test cases.
+Optional V2 spatial extraction adds finite straight edges, local cylinders
+and opposing wall footprints with position and material-side provenance.
 
 Env requirement: FreeCAD importable (set FREECAD_LIB / PYTHONPATH via
 `source dev_setup.sh` at the repo root).
@@ -24,6 +24,8 @@ import argparse
 import logging
 from pathlib import Path
 
+from freecad_validator._freecad_loader import import_freecad
+
 # ``FreeCAD`` is imported lazily inside ``extract()`` so the package
 # can be imported on hosts that haven't installed FreeCAD yet — the
 # import error only surfaces when the user actually tries to score
@@ -32,6 +34,7 @@ from .common import pick_representative_shape
 from .detectors import DEFAULT_BANK_DETECTORS, BankDetector
 from .extractors import DEFAULT_SHAPE_EXTRACTORS, ShapeExtractor
 from .schema import MeasurementBank
+from .spatial import InvalidSpatialShapeError, SpatialMeasurementError, extract_spatial
 
 log = logging.getLogger(__name__)
 
@@ -43,11 +46,14 @@ class MeasurementBankBuilder:
         self,
         extractors: list[ShapeExtractor] | None = None,
         detectors: list[BankDetector] | None = None,
+        *,
+        include_spatial: bool = False,
     ):
         self.extractors = (
             list(extractors) if extractors is not None else list(DEFAULT_SHAPE_EXTRACTORS)
         )
         self.detectors = list(detectors) if detectors is not None else list(DEFAULT_BANK_DETECTORS)
+        self.include_spatial = include_spatial
 
     def build(self, doc) -> MeasurementBank:
         shape, chosen = pick_representative_shape(doc)
@@ -61,10 +67,19 @@ class MeasurementBankBuilder:
             extractor.extract(shape=shape, doc=doc, owner_label=owner_label, bank=bank)
         for detector in self.detectors:
             detector.detect(bank=bank)
+        if self.include_spatial:
+            try:
+                bank.spatial = extract_spatial(shape)
+            except InvalidSpatialShapeError as exc:
+                bank.spatial_unavailable_reason = str(exc)
+            except SpatialMeasurementError:
+                raise
+            except Exception as exc:
+                raise SpatialMeasurementError(f"Final-geometry measurement failed: {exc}") from exc
         return bank
 
 
-def extract(fcstd_path: str | Path) -> MeasurementBank:
+def extract(fcstd_path: str | Path, *, include_spatial: bool = False) -> MeasurementBank:
     """Open `fcstd_path`, recompute, build the bank, close the doc.
 
     Raises whatever FreeCAD raises on malformed input; the caller is
@@ -78,15 +93,13 @@ def extract(fcstd_path: str | Path) -> MeasurementBank:
     (macOS Homebrew, apt, conda) so users typically don't need to
     set ``PYTHONPATH`` manually.
     """
-    from freecad_validator._freecad_loader import import_freecad
-
     FreeCAD = import_freecad()
 
     fcstd_path = str(fcstd_path)
     doc = FreeCAD.openDocument(fcstd_path)
     try:
         doc.recompute()
-        return MeasurementBankBuilder().build(doc)
+        return MeasurementBankBuilder(include_spatial=include_spatial).build(doc)
     finally:
         FreeCAD.closeDocument(doc.Name)
 

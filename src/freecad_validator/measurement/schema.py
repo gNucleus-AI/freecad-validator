@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .spatial import SpatialBank
+
 
 class Measurement(BaseModel):
     id: str
@@ -148,3 +150,5 @@ class MeasurementBank(BaseModel):
     feature_tree: list[FeatureTreeEntry] = Field(default_factory=list)
     sketch_profiles: list[SketchProfile] = Field(default_factory=list)
     conic_surfaces: list[ConicSurface] = Field(default_factory=list)
+    spatial: SpatialBank | None = None
+    spatial_unavailable_reason: str | None = None

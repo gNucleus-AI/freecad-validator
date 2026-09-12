@@ -30,6 +30,7 @@ from freecad_validator.consistency.checks import (
     CheckRegistry,
 )
 from freecad_validator.consistency.compare import as_display_angle
+from freecad_validator.consistency.geometry_bindings import apply_bindings, parse_bindings
 from freecad_validator.consistency.report import (
     ConsistencyReport,
     ParamFinding,
@@ -37,6 +38,7 @@ from freecad_validator.consistency.report import (
 )
 from freecad_validator.measurement.builder import extract as extract_bank
 from freecad_validator.measurement.schema import MeasurementBank
+from freecad_validator.measurement.spatial import SpatialMeasurementError
 from freecad_validator.spec.parser import (
     StructuredSpec,
     load_spec_json,
@@ -117,9 +119,11 @@ class ConsistencyChecker:
         tolerances: SpecTolerances | None = None,
         *,
         registry: CheckRegistry = DEFAULT_REGISTRY,
+        use_geometry_bindings: bool = False,
     ):
         self.tolerances = tolerances if tolerances is not None else SpecTolerances()
         self.registry = registry
+        self.use_geometry_bindings = use_geometry_bindings
 
     def check(
         self,
@@ -128,8 +132,9 @@ class ConsistencyChecker:
     ) -> ConsistencyReport:
         """Check a mapping, or a trusted spec JSON plus its case-local check.
 
-        A mapping has no trusted filesystem origin, so it uses generic checks
-        only. A spec JSON path is evaluator-controlled input and authorizes
+        A mapping has no trusted filesystem origin, so it cannot load executable
+        case checks. V2 can still apply its declarative geometry bindings.
+        A spec JSON path is evaluator-controlled input and authorizes
         loading only ``param_check.py`` from that same directory. Candidate
         directories are never searched for executable checker code.
         """
@@ -141,10 +146,18 @@ class ConsistencyChecker:
             spec_data = spec
             case_local = None
         structured = parse_spec(spec_data)
+        bindings = parse_bindings(spec_data, structured) if self.use_geometry_bindings else None
         fcstd_path_s = str(fcstd_path)
 
         try:
-            bank = extract_bank(fcstd_path_s)
+            if bindings is not None and any(
+                b.mode == "geometry" for b in bindings.parameters.values()
+            ):
+                bank = extract_bank(fcstd_path_s, include_spatial=True)
+            else:
+                bank = extract_bank(fcstd_path_s)
+        except SpatialMeasurementError:
+            raise
         except Exception as exc:  # defensive — caller sees a report, not a crash
             return _empty_bank_report(
                 structured,
@@ -229,6 +242,16 @@ class ConsistencyChecker:
                 self.tolerances.tol_scalar,
             )
 
+        if bindings is not None:
+            apply_bindings(
+                report,
+                bindings,
+                bank.spatial,
+                structured,
+                unavailable_reason=bank.spatial_unavailable_reason,
+                tol_scalar=self.tolerances.tol_scalar,
+                tol_pos=self.tolerances.tol_pos,
+            )
         report.summary = compute_summary(report)
         if report.summary.total_params == 0:
             report.error = "spec yielded zero parseable measurable parameters"

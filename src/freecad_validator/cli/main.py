@@ -29,6 +29,7 @@ from pathlib import Path
 
 from freecad_validator import Validator
 from freecad_validator.comparators.occt_bbox import OBBMeasurementError, OCCTUnavailableError
+from freecad_validator.consistency.geometry_bindings import GeometryBindingError
 from freecad_validator.fem import FEMValidator
 from freecad_validator.fem.schema import (
     DISP_TOL,
@@ -37,6 +38,7 @@ from freecad_validator.fem.schema import (
     STRESS_TOL,
 )
 from freecad_validator.fem.step_interface import DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+from freecad_validator.measurement.spatial import SpatialMeasurementError
 from freecad_validator.scorers.arguments import (
     GeometryArgumentError,
     add_tolerance_arguments,
@@ -569,7 +571,12 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except GeometryArgumentError as exc:
         command_parsers[args.command].error(str(exc))
-    except (OCCTUnavailableError, OBBMeasurementError) as exc:
+    except (
+        OCCTUnavailableError,
+        OBBMeasurementError,
+        GeometryBindingError,
+        SpatialMeasurementError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
