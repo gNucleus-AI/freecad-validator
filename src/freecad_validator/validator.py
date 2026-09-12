@@ -56,6 +56,7 @@ from freecad_validator.scorers.spec_consistency import (
     add_spec_tolerance_arguments,
     spec_tolerances_from_args,
 )
+from freecad_validator.scorers.spec_consistency_v2 import HeuristicSpecConsistencyScorerV2
 
 CombineMethod = Literal["harmonic", "min"]
 COMBINE_METHODS: tuple[CombineMethod, ...] = ("harmonic", "min")
@@ -166,7 +167,12 @@ class HeuristicValidator:
         else:
             self._geometry_scorer = HeuristicGeometryScorer(tolerances=geom_tolerances)
         self._scorer_version: ScorerVersion = scorer_version
-        self._spec_scorer = HeuristicSpecConsistencyScorer(
+        spec_scorer_class = (
+            HeuristicSpecConsistencyScorerV2
+            if scorer_version == "v2"
+            else HeuristicSpecConsistencyScorer
+        )
+        self._spec_scorer = spec_scorer_class(
             tolerances=spec_tolerances,
             failure_budget=spec_failure_budget,
         )

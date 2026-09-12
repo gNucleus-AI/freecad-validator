@@ -136,6 +136,7 @@ class HeuristicSpecConsistencyScorer(FCStdBaseScorer):
                 "raw_consistency_rate": summary.consistency_rate,
                 "measurable_rate": summary.measurable_rate,
                 "unexpected_features": summary.unexpected_features,
+                **({"geometry_bindings": report.binding_details} if report.binding_details else {}),
             },
         )
 
