@@ -648,8 +648,9 @@ The version-1 binding schema contains:
 - Each witness specifies feature type, position in millimetres, unit direction,
   local length scale, and material side where applicable. Wall pairs also specify
   `region: "material"` or `"void"`. Coincident concentric features use descending
-  radial or wall-separation order within the witness position tolerance, rather
-  than nearest expected size.
+  radial or wall-separation order within a fixed 1% of the witness's reference
+  local scale, with a `1e-6 mm` floor, rather than nearest expected size. Changing
+  `tol_pos` affects positional matching without redefining this stored order.
 
 Supported quantities are cylinder radius, diameter and axial extent, straight
 edge length, opposing-wall separation, and distance between two cylinder centers.
@@ -682,6 +683,16 @@ alignment can remain ambiguous for symmetric parts, and topology changes can alt
 supports. Oracle, rigid-pose, and local-error controls should accompany new
 annotations. The schemas live in `measurement/spatial.py` and
 `consistency/geometry_bindings.py`.
+
+Wall-pair booleans run in a separate process using the same FreeCAD library, with
+a 20-minute timeout. Opposing directions and overlapping projected bounds are
+filtered before native face intersections. A timed-out process is terminated;
+its partial measurements are discarded and the bank records the unavailable
+wall-pair measurement in `limitations`. Explicitly disabling wall-pair extraction
+records the same unavailable state. A binding that needs wall separation then
+raises a measurement error, rather than treating unfinished work as a missing
+feature or falling back to legacy checks. Other completed measurement kinds
+remain usable. This timeout covers wall-pair extraction, not the entire validator.
 
 ### Batch CLI layout
 

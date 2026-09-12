@@ -45,6 +45,26 @@ def test_validate_json_reports_a_difference(capsys, box_10x5x3, box_20x5x3, box_
     assert json.loads(out)["geometry_similarity"] < 1.0
 
 
+def test_stale_v2_binding_reports_error_after_native_geometry(capsys, tmp_path, box_10x5x3):
+    spec = tmp_path / "stale.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "key_parameters": "length = 10 mm\nwidth = 5 mm",
+                "geometry_bindings": {
+                    "version": 1,
+                    "parameters": {"length": {"mode": "legacy", "reason": "Construction length"}},
+                },
+            }
+        )
+    )
+    assert main(["validate", str(box_10x5x3), str(box_10x5x3), str(spec), "--json"]) == 1
+    captured = capsys.readouterr()
+    assert "missing=['width']" in captured.err
+    assert "Traceback" not in captured.err
+    assert not captured.out
+
+
 def test_combine_method_flag_is_applied(capsys, box_10x5x3, box_20x5x3, box_spec):
     out = _run(
         capsys,

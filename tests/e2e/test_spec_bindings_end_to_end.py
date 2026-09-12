@@ -13,6 +13,7 @@ from freecad_validator.consistency.geometry_bindings import (
     align_datum,
     evaluate_binding,
 )
+from freecad_validator.measurement import spatial
 from freecad_validator.measurement.spatial import extract_spatial, location
 
 pytestmark = pytest.mark.needs_freecad
@@ -70,6 +71,71 @@ def test_plane_pair_reports_actual_material_and_void_support():
     assert any(f.region == "void" and abs(f.values["separation"] - 10) < 1e-6 for f in pairs)
 
 
+@pytest.mark.parametrize("reason", ["disabled", "timeout"])
+def test_unfinished_native_wall_pairs_are_explicitly_unavailable(monkeypatch, reason):
+    import_freecad()
+    Part = importlib.import_module("Part")
+    calls = []
+
+    def timeout(shape):
+        calls.append(shape)
+        raise spatial._PlanePairTimeout("Wall-pair measurement exceeded its deadline")
+
+    monkeypatch.setattr(spatial, "_run_plane_pairs", timeout)
+    bank = extract_spatial(Part.makeBox(10, 5, 3), include_plane_pairs=reason != "disabled")
+    assert bool(calls) == (reason == "timeout")
+    assert any(message.startswith(spatial.PLANE_PAIR_UNAVAILABLE) for message in bank.limitations)
+    assert not any(f.kind == "plane_pair" for f in bank.features)
+    assert any(f.kind == "plane" for f in bank.features)
+    cfg = GeometryBinding(
+        mode="geometry",
+        quantity="separation",
+        reason="Box thickness",
+        witnesses=[
+            dict(
+                kind="plane_pair",
+                position=(5, 2.5, 1.5),
+                direction=(0, 0, 1),
+                scale=10,
+                region="material",
+            )
+        ],
+    )
+    with pytest.raises(spatial.SpatialMeasurementError, match=spatial.PLANE_PAIR_UNAVAILABLE):
+        evaluate_binding(cfg, 3, bank, np.eye(3), np.zeros(3), tol_scalar=0.01, tol_pos=0.01)
+
+
+def test_wall_pair_process_preserves_rotated_finite_supports():
+    App = import_freecad()
+    Part = importlib.import_module("Part")
+    shape = Part.makeBox(30, 20, 10).cut(Part.makeBox(10, 20, 7, App.Vector(10, 0, 3)))
+    reference = extract_spatial(shape)
+    candidate = shape.copy()
+    candidate.rotate(App.Vector(), App.Vector(1, 2, 3), 37)
+    candidate.translate(App.Vector(123, -97, 41))
+    measured = extract_spatial(candidate)
+    rotation, translation, _ = align_datum(reference.datum, measured.datum)
+    for region, separation in [("material", 3), ("void", 10)]:
+        supports = [
+            f
+            for f in reference.features
+            if f.kind == "plane_pair"
+            and f.region == region
+            and abs(f.values["separation"] - separation) < 1e-6
+        ]
+        assert supports
+        cfg = GeometryBinding(
+            mode="geometry",
+            quantity="separation",
+            reason="Corresponding finite walls",
+            witnesses=[dict(**location(f).model_dump(), region=region) for f in supports],
+        )
+        status, values, _, _ = evaluate_binding(
+            cfg, separation, measured, rotation, translation, tol_scalar=0.01, tol_pos=0.01
+        )
+        assert status == "consistent" and values == pytest.approx([separation] * len(supports))
+
+
 def test_disconnected_plane_overlap_keeps_separate_finite_supports():
     App = import_freecad()
     Part = importlib.import_module("Part")
@@ -121,6 +187,46 @@ def test_degenerate_sphere_edges_do_not_prevent_spatial_extraction():
     import_freecad()
     Part = importlib.import_module("Part")
     assert extract_spatial(Part.makeSphere(10)).datum.diagonal > 0
+
+
+@pytest.mark.parametrize("offset", [0.15, 0.18])
+@pytest.mark.parametrize("tol_pos", [0.005, 0.01, 0.02])
+def test_cylindrical_order_survives_position_tolerance_changes(offset, tol_pos):
+    App = import_freecad()
+    Part = importlib.import_module("Part")
+    central = Part.makeCylinder(8, 6)
+    lobes = Part.makeCylinder(10, 6, App.Vector(offset, 0, 0)).common(
+        Part.makeBox(24, 6, 6, App.Vector(-12, -3, 0))
+    )
+    shape = central.fuse(lobes).removeSplitter()
+    assert shape.isValid() and len(shape.Solids) == 1
+    reference = extract_spatial(shape)
+    arcs = [f for f in reference.features if f.kind == "cylinder"]
+    assert sorted(f.values["radius"] for f in arcs) == [8, 10]
+    for moved in (False, True):
+        candidate = shape.copy()
+        if moved:
+            candidate.rotate(App.Vector(), App.Vector(1, 2, 3), 37)
+            candidate.translate(App.Vector(123, -97, 41))
+        measured = extract_spatial(candidate)
+        rotation, translation, _ = align_datum(reference.datum, measured.datum)
+        for arc in arcs:
+            cfg = GeometryBinding(
+                mode="geometry",
+                quantity="radius",
+                reason="The corresponding cylindrical arc",
+                witnesses=[location(arc).model_dump()],
+            )
+            status, values, _, _ = evaluate_binding(
+                cfg,
+                arc.values["radius"],
+                measured,
+                rotation,
+                translation,
+                tol_scalar=0.01,
+                tol_pos=tol_pos,
+            )
+            assert status == "consistent" and values == [arc.values["radius"]]
 
 
 def evaluate_native_witness(reference, candidate, predicate, quantity, target):

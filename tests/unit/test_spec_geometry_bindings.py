@@ -95,6 +95,45 @@ def test_correct_size_at_wrong_location_fails():
     assert evaluate(b)[0] == "not_found"
 
 
+@pytest.mark.parametrize(("offset", "order"), [(0.08, 1), (0.12, 0)])
+@pytest.mark.parametrize("tol_pos", [0.005, 0.01, 0.02])
+def test_wall_pair_order_is_independent_of_position_tolerance(offset, order, tol_pos):
+    measured = bank()
+    measured.features = [
+        SpatialFeature(
+            kind="plane_pair",
+            position=(x, 0, 0),
+            direction=(0, 0, 1),
+            scale=10,
+            coincident_order=rank,
+            values={"separation": gap},
+            bounds_min=(x - 5, -5, -gap / 2),
+            bounds_max=(x + 5, 5, gap / 2),
+            region="void",
+        )
+        for x, gap, rank in [(0, 4, order), (offset, 6, 0)]
+    ]
+    cfg = GeometryBinding(
+        mode="geometry",
+        reason="The narrower wall pair at the reference position",
+        quantity="separation",
+        witnesses=[
+            dict(
+                kind="plane_pair",
+                position=(0, 0, 0),
+                direction=(0, 0, 1),
+                scale=10,
+                coincident_order=order,
+                region="void",
+            )
+        ],
+    )
+    status, values, _, _ = evaluate_binding(
+        cfg, 4, measured, np.eye(3), np.zeros(3), tol_scalar=0.01, tol_pos=tol_pos
+    )
+    assert status == "consistent" and values == [4]
+
+
 def test_geometry_pass_overrides_old_failure_and_geometry_failure_overrides_old_pass():
     b = bank()
     raw = {"key_parameters": "diameter = 10 mm\ntransition_length = 4 mm"}

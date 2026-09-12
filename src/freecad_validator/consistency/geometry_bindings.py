@@ -17,7 +17,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy.optimize import linear_sum_assignment
 
 from freecad_validator.consistency.report import ConsistencyReport, ParamFinding
-from freecad_validator.measurement.spatial import SpatialBank, SpatialDatum, SpatialLocation
+from freecad_validator.measurement.spatial import (
+    PLANE_PAIR_UNAVAILABLE,
+    SpatialBank,
+    SpatialDatum,
+    SpatialLocation,
+    SpatialMeasurementError,
+    coincident_order,
+)
 from freecad_validator.spec.parser import StructuredSpec
 
 
@@ -223,6 +230,13 @@ def align_datum(
     return best[1], best[2], best[0]
 
 
+def _require_complete_measurement(binding: GeometryBinding, bank: SpatialBank) -> None:
+    if binding.quantity == "separation" and any(
+        x.startswith(PLANE_PAIR_UNAVAILABLE) for x in bank.limitations
+    ):
+        raise SpatialMeasurementError("; ".join(bank.limitations))
+
+
 def evaluate_binding(
     binding: GeometryBinding,
     expected: float,
@@ -233,11 +247,8 @@ def evaluate_binding(
     tol_scalar: float,
     tol_pos: float,
 ):
+    _require_complete_measurement(binding, bank)
     candidates = [f for f in bank.features if f.kind == binding.witnesses[0].kind]
-    if binding.quantity == "separation" and any(
-        "plane_pair extraction unavailable" in x for x in bank.limitations
-    ):
-        raise GeometryBindingError("; ".join(bank.limitations))
     cost = np.full((len(binding.witnesses), max(len(candidates), len(binding.witnesses))), 1e9)
     for i, witness in enumerate(binding.witnesses):
         for j, feature in enumerate(candidates):
@@ -263,20 +274,8 @@ def evaluate_binding(
             tolerance = max(1e-6, tol_pos * witness.scale)
             if distance > tolerance:
                 continue
-            order_quantity = {"cylinder": "radius", "plane_pair": "separation"}.get(feature.kind)
-            if order_quantity:
-                tolerance = max(1e-6, tol_pos * witness.scale)
-                peers = [
-                    f.values[order_quantity]
-                    for f in candidates
-                    if f.convex == feature.convex
-                    and f.region == feature.region
-                    and math.dist(f.position, feature.position) <= tolerance
-                    and abs(np.dot(f.direction, feature.direction)) > 1 - 1e-7
-                    and f.values[order_quantity] > feature.values[order_quantity] + 1e-6
-                ]
-                peers.sort()
-                order = sum(i == 0 or v - peers[i - 1] > 1e-6 for i, v in enumerate(peers))
+            if feature.kind in ("cylinder", "plane_pair"):
+                order = coincident_order(feature, candidates, scale=witness.scale)
                 if witness.coincident_order != order:
                     continue
             cost[i, j] = distance / tolerance
@@ -352,6 +351,9 @@ def apply_bindings(
         "geometry_parameters": len(geometric),
         "legacy_parameters": len(bindings.parameters) - len(geometric),
     }
+    if bank is not None:
+        for binding in geometric.values():
+            _require_complete_measurement(binding, bank)
     if geometric and bank is not None and not bank.datum.landmarks and bindings.datum.landmarks:
         # A valid but featureless candidate (for example a sphere) is missing
         # the datum's physical supports; this is not a backend failure.
