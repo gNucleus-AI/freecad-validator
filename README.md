@@ -130,8 +130,8 @@ fails to resolve its dependencies instead of succeeding without OCP.
 FreeCAD's binding must also match the Python interpreter; the FreeCAD 1.1.0
 bundle used for end-to-end validation here embeds Python 3.11.
 
-For slim Debian/Ubuntu containers, install the shared libraries used by
-OCP/VTK before installing the v2 extra. Add this to the Dockerfile:
+Slim Debian/Ubuntu containers need the shared libraries used by OCP/VTK when
+using the v2 extra. Add this to the Dockerfile:
 
 ```dockerfile
 RUN apt-get update \
@@ -139,9 +139,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ```
 
-These runtime libraries are needed even for headless scoring; a display
-server is not required. Missing libraries can cause `import OCP` to fail
-with an error such as `ImportError: libGL.so.1`.
+These are runtime requirements, not install-time ones: `pip install` succeeds
+without them, and `import OCP` then fails with an error such as
+`ImportError: libGL.so.1`, so a clean install is not evidence that scoring will
+work. They are needed even for headless scoring; a display server is not
+required.
 
 Constructing a v2 `Validator` or geometry scorer checks the native dependencies
 before reading models. Missing OCP or shared libraries raise

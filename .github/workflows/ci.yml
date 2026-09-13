@@ -16,8 +16,8 @@ jobs:
           - os: ubuntu-24.04-arm
             python-version: "3.11"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: install native runtime libraries
@@ -54,8 +54,8 @@ jobs:
       matrix:
         host-python: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.host-python }}
       - name: install wheel under host Python
@@ -63,7 +63,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
           echo "FCSTD_ADAPTER_PATH=$(python -c 'from importlib.util import find_spec; from pathlib import Path; spec = find_spec("freecad_validator"); print(Path(next(iter(spec.submodule_search_locations))) / "fem" / "adapters" / "fcstd.py")')" >> "$GITHUB_ENV"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: execute installed adapter with embedded-Python equivalent
