@@ -130,6 +130,41 @@ fails to resolve its dependencies instead of succeeding without OCP.
 FreeCAD's binding must also match the Python interpreter; the FreeCAD 1.1.0
 bundle used for end-to-end validation here embeds Python 3.11.
 
+### Installing alongside a conda FreeCAD
+
+The `v2` extra cannot be installed into an environment whose FreeCAD came from
+conda. FreeCAD pulls `vtk` through conda; the extra pins `vtk==9.6.2`; pip
+refuses to uninstall a conda-owned package to reach that version:
+
+```
+error: uninstall-no-record-file
+× Cannot uninstall vtk 9.6.0
+╰─> The package was installed by conda.
+```
+
+Pinning the matching vtk in conda instead does not resolve it either — on
+Python 3.12 conda cannot place `vtk=9.6.2` beside `freecad=1.1.0` (libboost
+conflict). Installing OCP with `--no-deps` fails at import, because OCP loads
+`libvtkWrappingPythonCore` regardless of which of its modules are used.
+
+Take the binding from conda instead, so OCP and FreeCAD link the same vtk, and
+install the validator **without** the extra:
+
+```bash
+mamba install -n base -y -c conda-forge "freecad=1.1.0" "ocp=7.9.3.1"
+pip install gnucleus-freecad-validator          # no [v2]; OCP is already satisfied
+```
+
+Conda's `ocp` also supplies `libGL.so.1` and `libXrender`, so no additional
+system packages are required for headless scoring on this route.
+
+Whichever route is used, this check fails loudly if the backend is missing:
+
+```bash
+python -c "from OCP.BRepBndLib import BRepBndLib; from freecad_validator import Validator; \
+assert callable(BRepBndLib.AddOBB_s); Validator(scorer_version='v2')"
+```
+
 Slim Debian/Ubuntu containers need the shared libraries used by OCP/VTK when
 using the v2 extra. Add this to the Dockerfile:
 
