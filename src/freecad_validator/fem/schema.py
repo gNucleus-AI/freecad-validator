@@ -217,6 +217,10 @@ class CaseDefinition:
     mesh_expectations: dict[str, Any] = field(default_factory=dict)
     rubric: dict[str, Any] = field(default_factory=dict)
     weights_override: dict[str, float] | None = None
+    # Keyword-only additions preserve the existing positional constructor API.
+    materials: list[dict[str, Any]] = field(default_factory=list, kw_only=True)
+    known_pitfalls: list[str] = field(default_factory=list, kw_only=True)
+    expected_scorer_behavior: str = field(default="", kw_only=True)
 
     # convenience -----------------------------------------------------------
     def reference_quantities(self) -> dict[str, ReferenceQuantity]:
@@ -275,6 +279,7 @@ class Submission:
 
     # Caller metadata (not read by scoring logic).
     meta: dict[str, Any] = field(default_factory=dict)
+    materials: list[dict[str, Any]] = field(default_factory=list, kw_only=True)
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> Submission:

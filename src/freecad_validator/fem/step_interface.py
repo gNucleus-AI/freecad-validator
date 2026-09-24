@@ -44,6 +44,18 @@ from freecad_validator.fem.schema import (
     Submission,
 )
 from freecad_validator.fem.scorer import score_result
+from freecad_validator.fem.topology_compare import (
+    TOPOLOGY_FIELDS as BOOLEAN_TOPOLOGY_FIELDS,
+)
+from freecad_validator.fem.topology_compare import (
+    container_mismatches as _boolean_minimum_reference_mismatches,
+)
+from freecad_validator.fem.topology_compare import (
+    topology_difference,
+)
+from freecad_validator.fem.topology_compare import (
+    topology_mismatches as _boolean_topology_mismatches,
+)
 
 HERE = Path(__file__).resolve().parent
 FCSTD_ADAPTER = str(HERE / "adapters" / "fcstd.py")
@@ -67,17 +79,6 @@ DIAGNOSTIC_TAIL_CHARACTERS = 16_000
 # no report/convergence study, so those stay at 0.
 PREPROCESSING_VOLUME_REL_TOL = 1e-3
 PREPROCESSING_SURFACE_AREA_REL_TOL = 1e-2
-BOOLEAN_TOPOLOGY_FIELDS = (
-    "num_solids",
-    "num_compsolids",
-    "shape_types",
-    "num_faces",
-    "num_edges",
-)
-BOOLEAN_CONTAINER_FIELDS = ("num_compsolids", "shape_types")
-BOOLEAN_REGION_INTEGER_FIELDS = ("num_faces", "num_edges", "num_shells")
-BOOLEAN_REGION_FLOAT_FIELDS = ("volume_mm3", "surface_area_mm2")
-BOOLEAN_TOPOLOGY_REL_TOL = 1e-5
 
 
 def _relative_difference(left: float, right: float) -> float:
@@ -87,7 +88,7 @@ def _relative_difference(left: float, right: float) -> float:
 def _preprocessing_gate_report(
     input_geometry: dict[str, Any], candidate_geometry: dict[str, Any]
 ) -> ScoringReport | None:
-    """Return an immediate zero when candidate geometry matches the input STEP."""
+    """Reject unchanged source geometry only when geometry and topology match."""
     keys = ("volume_mm3", "surface_area_mm2")
     if not all(float(input_geometry.get(key, 0.0) or 0.0) > 0.0 for key in keys):
         return None
@@ -105,8 +106,19 @@ def _preprocessing_gate_report(
     if volume_diff > PREPROCESSING_VOLUME_REL_TOL or area_diff > PREPROCESSING_SURFACE_AREA_REL_TOL:
         return None
 
+    source_signature = _boolean_topology_signature(input_geometry, "source STEP")
+    candidate_signature = _boolean_topology_signature(candidate_geometry, "candidate FCStd")
+    topology_diff = topology_difference(source_signature, candidate_signature)
+    max_diff = max(
+        volume_diff / PREPROCESSING_VOLUME_REL_TOL,
+        area_diff / PREPROCESSING_SURFACE_AREA_REL_TOL,
+        topology_diff,
+    )
+    if max_diff > 1.0:
+        return None
+
     message = (
-        "Candidate volume and surface area match the input STEP; "
+        "Candidate volume, surface area, and topology match the input STEP; "
         "required geometry preprocessing was not performed."
     )
     failure = {
@@ -130,9 +142,11 @@ def _preprocessing_gate_report(
         confidence=1.0,
         reproducibility_status="not_evaluated",
         evidence=[
-            "preprocessing_gate: input STEP and candidate geometry match",
+            "preprocessing_gate: input STEP and candidate geometry and topology match",
             f"preprocessing_volume_rel_diff: {volume_diff:.6g}",
             f"preprocessing_surface_area_rel_diff: {area_diff:.6g}",
+            f"preprocessing_topology_normalized_diff: {topology_diff:.6g}",
+            f"preprocessing_max_normalized_diff: {max_diff:.6g}",
         ],
     )
 
@@ -151,77 +165,6 @@ def _boolean_topology_signature(geometry: dict[str, Any], source: str) -> dict[s
         **{field: geometry[field] for field in BOOLEAN_TOPOLOGY_FIELDS},
         "regions": geometry["regions"],
     }
-
-
-def _boolean_regions_match(expected: Any, actual: Any) -> bool:
-    if not isinstance(expected, dict) or not isinstance(actual, dict):
-        return False
-    if any(expected.get(field) != actual.get(field) for field in BOOLEAN_REGION_INTEGER_FIELDS):
-        return False
-    for field in BOOLEAN_REGION_FLOAT_FIELDS:
-        expected_value = expected.get(field)
-        actual_value = actual.get(field)
-        if not isinstance(expected_value, (int, float)) or not isinstance(
-            actual_value, (int, float)
-        ):
-            return False
-        if (
-            _relative_difference(float(expected_value), float(actual_value))
-            > BOOLEAN_TOPOLOGY_REL_TOL
-        ):
-            return False
-    return True
-
-
-def _boolean_topology_mismatches(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
-    mismatches = []
-    for field in BOOLEAN_TOPOLOGY_FIELDS:
-        if expected.get(field) != actual.get(field):
-            mismatches.append(
-                f"{field}: expected {expected.get(field)!r}, got {actual.get(field)!r}"
-            )
-
-    expected_regions = expected.get("regions")
-    actual_regions = actual.get("regions")
-    if not isinstance(expected_regions, list) or not isinstance(actual_regions, list):
-        mismatches.append("regions: missing or invalid region list")
-        return mismatches
-    if len(expected_regions) != len(actual_regions):
-        mismatches.append(f"regions: expected {len(expected_regions)}, got {len(actual_regions)}")
-        return mismatches
-
-    unmatched_actual = list(actual_regions)
-    for index, expected_region in enumerate(expected_regions):
-        matching_index = next(
-            (
-                actual_index
-                for actual_index, actual_region in enumerate(unmatched_actual)
-                if _boolean_regions_match(expected_region, actual_region)
-            ),
-            None,
-        )
-        if matching_index is None:
-            mismatches.append(f"regions[{index}]: no matching candidate region")
-        else:
-            unmatched_actual.pop(matching_index)
-    return mismatches
-
-
-def _boolean_minimum_reference_mismatches(
-    reference: dict[str, Any], candidate: dict[str, Any]
-) -> list[str]:
-    """Compare only the topology requirements needed to prove Boolean output."""
-    mismatches = []
-    reference_regions = reference["regions"]
-    candidate_regions = candidate["regions"]
-    if len(reference_regions) != len(candidate_regions):
-        mismatches.append(
-            f"regions: expected {len(reference_regions)}, got {len(candidate_regions)}"
-        )
-    for field in BOOLEAN_CONTAINER_FIELDS:
-        if reference[field] != candidate[field]:
-            mismatches.append(f"{field}: expected {reference[field]!r}, got {candidate[field]!r}")
-    return mismatches
 
 
 def _boolean_failure_report(failure_mode: str, message: str, evidence: list[str]) -> ScoringReport:
@@ -373,6 +316,7 @@ def build_case(
         units_expected={"length": "mm", "force": "N", "stress": "MPa"},
         geometry=geometry,
         material=dict(reference_sub.get("material", {})),
+        materials=list(reference_sub.get("materials") or []),
         expected_bcs=reference_sub.get("boundary_conditions") or [{"type": "fixed"}],
         expected_loads=reference_sub.get("loads") or [],
         reference={
@@ -489,12 +433,26 @@ def _run_adapter(
             popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_options["start_new_session"] = True
-        with open(log_path, "w", encoding="utf-8") as log_file:
+        # FreeCAD restores included VTK files beneath its temp root. Give each
+        # worker its own root so concurrent extractions cannot overwrite them.
+        with (
+            tempfile.TemporaryDirectory(
+                prefix="freecad-worker-", dir=Path(log_path).resolve().parent
+            ) as worker_temp,
+            open(log_path, "w", encoding="utf-8") as log_file,
+        ):
+            environment = {
+                **os.environ,
+                "TMPDIR": worker_temp,
+                "TEMP": worker_temp,
+                "TMP": worker_temp,
+            }
             process = subprocess.Popen(
                 command,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 text=True,
+                env=environment,
                 **popen_options,
             )
             try:

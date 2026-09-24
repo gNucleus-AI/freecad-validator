@@ -1,5 +1,6 @@
 """Opt-in end-to-end FEM replay using a generated, non-sensitive fixture."""
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,6 +9,19 @@ import pytest
 
 from freecad_validator._freecad_loader import resolve_freecad_command
 from freecad_validator.fem import FEMValidator
+from freecad_validator.fem.step_interface import FCSTD_ADAPTER
+
+
+@pytest.mark.needs_freecad
+def test_material_counts_from_real_freecad_solids(tmp_path):
+    output = tmp_path / "materials.json"
+    checker = Path(__file__).with_name("check_fem_material_counts.py")
+    subprocess.run(
+        [resolve_freecad_command(), str(checker), FCSTD_ADAPTER, str(output)],
+        check=True,
+        timeout=60,
+    )
+    assert json.loads(output.read_text())["passed"]
 
 
 @pytest.mark.needs_freecad
