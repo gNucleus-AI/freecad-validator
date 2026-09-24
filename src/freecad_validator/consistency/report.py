@@ -42,6 +42,7 @@ class ConsistencyReport(BaseModel):
     unexpected_features: list[str] = Field(default_factory=list)
     feature_health: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
+    binding_details: dict[str, Any] = Field(default_factory=dict)
 
 
 def compute_summary(report: ConsistencyReport) -> ReportSummary:

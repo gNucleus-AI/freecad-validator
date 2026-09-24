@@ -43,6 +43,8 @@ from pydantic import BaseModel
 from freecad_validator.comparators.geometry import GeometryTolerances
 from freecad_validator.comparators.occt_bbox import OBBMeasurementError, OCCTUnavailableError
 from freecad_validator.consistency.checker import SpecTolerances
+from freecad_validator.consistency.geometry_bindings import GeometryBindingError
+from freecad_validator.measurement.spatial import SpatialMeasurementError
 from freecad_validator.scorers.arguments import (
     add_tolerance_arguments,
     tolerances_from_args,
@@ -56,6 +58,7 @@ from freecad_validator.scorers.spec_consistency import (
     add_spec_tolerance_arguments,
     spec_tolerances_from_args,
 )
+from freecad_validator.scorers.spec_consistency_v2 import HeuristicSpecConsistencyScorerV2
 
 CombineMethod = Literal["harmonic", "min"]
 COMBINE_METHODS: tuple[CombineMethod, ...] = ("harmonic", "min")
@@ -166,7 +169,12 @@ class HeuristicValidator:
         else:
             self._geometry_scorer = HeuristicGeometryScorer(tolerances=geom_tolerances)
         self._scorer_version: ScorerVersion = scorer_version
-        self._spec_scorer = HeuristicSpecConsistencyScorer(
+        spec_scorer_class = (
+            HeuristicSpecConsistencyScorerV2
+            if scorer_version == "v2"
+            else HeuristicSpecConsistencyScorer
+        )
+        self._spec_scorer = spec_scorer_class(
             tolerances=spec_tolerances,
             failure_budget=spec_failure_budget,
         )
@@ -246,7 +254,12 @@ def main(argv: list[str] | None = None) -> int:
             reference_fcstd=args.reference_fcstd,
             spec_json=args.spec_json,
         )
-    except (OCCTUnavailableError, OBBMeasurementError) as exc:
+    except (
+        OCCTUnavailableError,
+        OBBMeasurementError,
+        GeometryBindingError,
+        SpatialMeasurementError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
