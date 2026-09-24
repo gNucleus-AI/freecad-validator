@@ -235,6 +235,13 @@ candidate solve with CalculiX, verifies the stored displacement and stress
 fields, and returns a deterministic 0–100 report with validity gates and
 engineering diagnostics.
 
+Material validation compares all extracted material cards and the number of solids
+assigned to each, allowing equivalent cards to be split or merged. It checks every
+card for physically invalid properties. Assignment matching compares counts, not
+which particular solid receives a material. Trusted payloads may include a
+`materials` list with `E_MPa`, `rho_kg_m3`, `nu`, and `body_count` on each card;
+payloads without this list on the reference retain the single-`material` comparison.
+
 ```python
 from freecad_validator.fem import FEMValidator
 
@@ -271,6 +278,11 @@ Boolean operation, and `--require-preprocessing` only when preprocessing is an
 explicit task requirement. Neither requirement is inferred from instruction
 text. Intermediate extraction JSON is temporary by default; pass
 `--extract-dir` to retain it.
+
+The preprocessing gate treats geometry as unchanged only when volume, surface
+area, and topology all match. Face or region partitions can therefore satisfy
+preprocessing even when volume and area are preserved. Region comparisons use
+one-to-one matching within tolerance and do not depend on region ordering.
 
 > [!WARNING]
 > FEM validation executes FreeCAD and CalculiX subprocesses against the

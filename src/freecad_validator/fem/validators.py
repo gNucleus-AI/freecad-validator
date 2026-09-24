@@ -29,22 +29,15 @@ from freecad_validator.fem.schema import (
     Finding,
     Submission,
 )
+from freecad_validator.fem.setup_compare import (
+    compare_material_body_counts,
+    compare_restraints,
+    compare_youngs_modulus,
+)
 
 # --------------------------------------------------------------------------- #
 # small helpers                                                               #
 # --------------------------------------------------------------------------- #
-RESTRAINT_TYPES = {
-    "fixed",
-    "clamped",
-    "encastre",
-    "pinned",
-    "restraint",
-    "displacement",
-    "fixed_support",
-    "support",
-}
-PARTIAL_RESTRAINT_TYPES = {"symmetry", "symmetric", "roller", "frictionless", "contact"}
-
 SHAPE_WORDS = [
     "cantilever",
     "simply supported",
@@ -116,13 +109,6 @@ def _norm_analysis(a: str) -> str:
     if "static" in a or "linear" in a or "stress" in a:
         return "static"
     return a or "static"
-
-
-def _has_restraint(bcs: list[dict[str, Any]]) -> tuple[bool, bool]:
-    """(has_full_restraint, has_partial_restraint)."""
-    full = any((b.get("type", "").lower() in RESTRAINT_TYPES) for b in bcs)
-    partial = any((b.get("type", "").lower() in PARTIAL_RESTRAINT_TYPES) for b in bcs)
-    return full, partial
 
 
 def _dist(a: list[float], b: list[float]) -> float:
@@ -463,33 +449,11 @@ def validate_problem_setup(case: CaseDefinition, sub: Submission) -> tuple[float
                 )
             )
 
-    # material (expected vs actual) ----------------------------------------
-    exp_E = _num(case.material, "E_MPa", "youngs_modulus_MPa")
-    got_E = _num(sub.material, "E_MPa", "youngs_modulus_MPa")
-    if exp_E and got_E:
-        err = metrics.relative_error(got_E, exp_E)
-        if err > 0.20:
-            findings.append(
-                Finding(
-                    cat,
-                    FailureMode.WRONG_MATERIAL,
-                    "critical",
-                    f"Young's modulus {got_E:g} MPa differs from the specified "
-                    f"{exp_E:g} MPa by {err * 100:.0f}% - wrong material.",
-                    penalty=80,
-                )
-            )
-    elif exp_E and not got_E:
-        findings.append(
-            Finding(cat, "MATERIAL_NOT_STATED", "minor", "Young's modulus not reported.", penalty=8)
-        )
-
-    # boundary conditions ---------------------------------------------------
-    full, partial = _has_restraint(sub.boundary_conditions)
-    case_full, _ = _has_restraint(case.expected_bcs)
-    # transient/explicit dynamics (e.g. a drop test) can be in free flight with
-    # no classic restraint - rigid-body motion is physical there - so it is not
-    # in the set that requires a fixed support.
+    # Compare all material assignments when extraction provides count evidence.
+    if case.materials:
+        findings.extend(compare_material_body_counts(case.materials, sub.materials))
+    else:
+        findings.extend(compare_youngs_modulus(case.material, sub.material))
     needs_restraint = want in (
         "static",
         "buckling",
@@ -498,68 +462,8 @@ def validate_problem_setup(case: CaseDefinition, sub: Submission) -> tuple[float
         "large_deformation",
         "contact",
     )
-    expects_bc = len(case.expected_bcs) > 0
-    if needs_restraint and expects_bc:
-        if case_full and not full:
-            # the case calls for a real restraint and the submission lacks one
-            if partial:
-                findings.append(
-                    Finding(
-                        cat,
-                        FailureMode.MISSING_BOUNDARY_CONDITION,
-                        "major",
-                        "Only partial/symmetry restraints found where a full restraint "
-                        "is required; rigid-body modes may not be removed.",
-                        penalty=30,
-                    )
-                )
-            else:
-                findings.append(
-                    Finding(
-                        cat,
-                        FailureMode.MISSING_BOUNDARY_CONDITION,
-                        "critical",
-                        "No restraint/fixed boundary condition - the model is "
-                        "under-constrained (rigid-body motion).",
-                        penalty=80,
-                    )
-                )
-        elif (not case_full) and not (full or partial):
-            # symmetry-reducible case, but the submission has no restraint at all
-            findings.append(
-                Finding(
-                    cat,
-                    FailureMode.MISSING_BOUNDARY_CONDITION,
-                    "critical",
-                    "No restraint at all - even a symmetry model needs its symmetry "
-                    "planes constrained to remove rigid-body motion.",
-                    penalty=80,
-                )
-            )
-        elif len(sub.boundary_conditions) < len(case.expected_bcs):
-            findings.append(
-                Finding(
-                    cat,
-                    "BC_COUNT_LOW",
-                    "minor",
-                    f"Fewer boundary conditions ({len(sub.boundary_conditions)}) than "
-                    f"expected ({len(case.expected_bcs)}).",
-                    penalty=10,
-                )
-            )
-    elif expects_bc and len(sub.boundary_conditions) < len(case.expected_bcs):
-        findings.append(
-            Finding(
-                cat,
-                "BC_COUNT_LOW",
-                "minor",
-                f"Fewer boundary conditions ({len(sub.boundary_conditions)}) than "
-                f"expected ({len(case.expected_bcs)}).",
-                penalty=10,
-            )
-        )
+    findings.extend(compare_restraints(case.expected_bcs, sub.boundary_conditions, needs_restraint))
 
-    # loads -----------------------------------------------------------------
     expects_load = len(case.expected_loads) > 0
     if expects_load and not sub.loads and want not in ("modal",):
         findings.append(
@@ -1015,51 +919,65 @@ def evaluate_physical(case: CaseDefinition, sub: Submission) -> tuple[float, lis
             )
         )
 
-    # material admissibility
-    E = _num(sub.material, "E_MPa", "youngs_modulus_MPa")
-    nu = _num(sub.material, "nu", "poisson", "PoissonRatio")
-    if E is not None and E <= 0:
-        findings.append(
-            Finding(
-                cat,
-                FailureMode.PHYSICALLY_IMPOSSIBLE,
-                "critical",
-                "Non-positive Young's modulus.",
-                penalty=85,
-            )
-        )
-    if nu is not None:
-        if nu <= -1.0 or nu > 0.6:
+    # Validate every material card, including density and finite values.
+    materials = sub.materials or [sub.material]
+    for index, material in enumerate(materials, 1):
+        label = f"Material {index}: " if len(materials) > 1 else ""
+        E = _num(material, "E_MPa", "youngs_modulus_MPa")
+        rho = _num(material, "rho_kg_m3", "density_kg_m3")
+        nu = _num(material, "nu", "poisson", "PoissonRatio")
+        if E is not None and (not math.isfinite(E) or E <= 0):
             findings.append(
                 Finding(
                     cat,
                     FailureMode.PHYSICALLY_IMPOSSIBLE,
                     "critical",
-                    f"Poisson's ratio {nu} is outside the admissible range (-1, 0.5].",
+                    f"{label}Young's modulus must be finite and positive.",
                     penalty=85,
                 )
             )
-        elif nu >= 0.5:
+        if rho is not None and (not math.isfinite(rho) or rho <= 0):
             findings.append(
                 Finding(
                     cat,
-                    "NU_INCOMPRESSIBLE",
-                    "major",
-                    f"Poisson's ratio {nu} >= 0.5 (near-incompressible) needs special "
-                    "elements; standard elements lock.",
-                    penalty=28,
+                    FailureMode.PHYSICALLY_IMPOSSIBLE,
+                    "critical",
+                    f"{label}density must be finite and positive.",
+                    penalty=85,
                 )
             )
-        elif nu < 0:
-            findings.append(
-                Finding(
-                    cat,
-                    "NU_AUXETIC",
-                    "minor",
-                    f"Negative Poisson's ratio {nu} is rare - confirm it is intended.",
-                    penalty=6,
+        if nu is not None:
+            if not math.isfinite(nu) or nu <= -1.0 or nu > 0.6:
+                findings.append(
+                    Finding(
+                        cat,
+                        FailureMode.PHYSICALLY_IMPOSSIBLE,
+                        "critical",
+                        f"{label}Poisson's ratio {nu} is outside the admissible range (-1, 0.5].",
+                        penalty=85,
+                    )
                 )
-            )
+            elif nu >= 0.5:
+                findings.append(
+                    Finding(
+                        cat,
+                        "NU_INCOMPRESSIBLE",
+                        "major",
+                        f"{label}Poisson's ratio {nu} >= 0.5 (near-incompressible) "
+                        "needs special elements; standard elements lock.",
+                        penalty=28,
+                    )
+                )
+            elif nu < 0:
+                findings.append(
+                    Finding(
+                        cat,
+                        "NU_AUXETIC",
+                        "minor",
+                        f"{label}negative Poisson's ratio {nu} is rare - confirm it is intended.",
+                        penalty=6,
+                    )
+                )
 
     # modal
     if want == "modal":

@@ -69,6 +69,17 @@ REPLAY_SCALAR_FIELDS = replay_compare.REPLAY_SCALAR_FIELDS
 compare_result_snapshots = replay_compare.compare_result_snapshots
 select_scored_results = replay_compare.select_scored_results
 
+material_path = Path(__file__).resolve().parents[1] / "material_counts.py"
+material_spec = importlib.util.spec_from_file_location(
+    "_freecad_validator_material_counts", material_path
+)
+if material_spec is None or material_spec.loader is None:
+    raise ImportError(f"cannot load material count module from {material_path}")
+material_counts = importlib.util.module_from_spec(material_spec)
+material_spec.loader.exec_module(material_counts)
+grouped_material_counts = material_counts.grouped_material_counts
+material_signature = material_counts.material_signature
+
 
 def runtime_info(require_calculix=False):
     """Return runtime versions and optionally verify the configured solver."""
@@ -227,6 +238,8 @@ def verify_solver_replay(doc, stored_result, analysis_type, output_path):
         fea.update_objects()
         fea.setup_working_dir(work_dir, create=True)
         fea.setup_ccx()
+        if not os.path.isfile(fea.ccx_binary):
+            raise FileNotFoundError(f"CalculiX not found: {fea.ccx_binary}")
         prerequisite_error = fea.check_prerequisites()
         if prerequisite_error:
             raise RuntimeError(f"CalculiX replay prerequisites failed: {prerequisite_error}")
@@ -235,7 +248,7 @@ def verify_solver_replay(doc, stored_result, analysis_type, output_path):
         # analysis-group members, while documents can also contain detached result
         # objects. Removing both makes the freshly loaded replay result unambiguous.
         fea.purge_results()
-        for stale in [obj for obj in doc.Objects if _is_result_object(obj)]:
+        for stale in [obj for obj in doc.Objects if obj.TypeId == "Fem::FemResultObjectPython"]:
             doc.removeObject(stale.Name)
         doc.recompute()
         fea.write_inp_file()
@@ -272,18 +285,92 @@ def verify_solver_replay(doc, stored_result, analysis_type, output_path):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def material_values(obj):
+    material = dict(obj.Material)
+    out = {"name": material.get("Name", "")}
+    for source, target, unit in (
+        ("YoungsModulus", "E_MPa", "MPa"),
+        ("Density", "rho_kg_m3", "kg/m^3"),
+    ):
+        if material.get(source):
+            out[target] = qty(material[source], unit)
+    if material.get("PoissonRatio"):
+        out["nu"] = float(material["PoissonRatio"])
+    return out
+
+
+def _add_distinct_solids(buckets, solids):
+    """Deduplicate local topology references; no geometric/body correspondence."""
+    for solid in solids:
+        bucket = buckets.setdefault(solid.hashCode(), [])
+        if not any(solid.isSame(previous) for previous in bucket):
+            bucket.append(solid)
+
+
+def extract_material_body_counts(objects, total_solids):
+    """Count referenced solids per parameter card in the selected analysis.
+
+    A single material covers every solid, even when it has explicit References.
+    Otherwise empty References denotes the default for the remaining solids.
+    Only local topology identity is used to deduplicate repeated references;
+    this does not compare where materials occur in reference/candidate models.
+    """
+    materials = [
+        obj for obj in objects if "Material" in obj.TypeId and getattr(obj, "Material", None)
+    ]
+    if len(materials) == 1:
+        return grouped_material_counts(
+            [{**material_values(materials[0]), "body_count": total_solids}]
+        )
+    groups, assigned = {}, {}
+    default = None
+    for obj in materials:
+        values = material_values(obj)
+        signature = material_signature(values)
+        group = groups.setdefault(signature, {"values": values, "solids": {}})
+        if not obj.References:
+            if default is not None and default != signature:
+                raise ValueError("Multiple materials have empty/default References")
+            default = signature
+            continue
+        for parent, subnames in obj.References:
+            for subname in subnames or ("",):
+                # Keep the referenced topology: transforming a copy would give
+                # repeated references different identities and inflate counts.
+                shape = parent.getSubObject(subname)
+                solids = shape.Solids
+                if not solids:
+                    raise ValueError(
+                        f"Material reference {parent.Name}/{subname} contains no solids"
+                    )
+                _add_distinct_solids(group["solids"], solids)
+                _add_distinct_solids(assigned, solids)
+    assigned_count = sum(len(bucket) for bucket in assigned.values())
+    if assigned_count > total_solids:
+        raise ValueError("Material references contain more solids than the analysed geometry")
+    counts = []
+    for signature, group in groups.items():
+        count = sum(len(bucket) for bucket in group["solids"].values())
+        if signature == default:
+            count += total_solids - assigned_count
+        counts.append({**group["values"], "body_count": count})
+    return grouped_material_counts(counts)
+
+
+def linked_mesh_shape(mesh):
+    """Read the selected meshed shape in world coordinates, including parent placements."""
+    from femmesh.meshtools import sub_shape_at_global_placement
+
+    link = getattr(mesh, "Shape", None) or getattr(mesh, "Part", None)
+    if hasattr(link, "getGlobalPlacement"):
+        return sub_shape_at_global_placement(link, "")
+    return link
+
+
 def extract_material(doc):
     for o in doc.Objects:
         if "Material" in o.TypeId and getattr(o, "Material", None):
-            m = dict(o.Material)
-            out = {"name": m.get("Name", "")}
-            if m.get("YoungsModulus"):
-                out["E_MPa"] = qty(m["YoungsModulus"], "MPa")
-            if m.get("PoissonRatio"):
-                out["nu"] = float(m["PoissonRatio"])
-            if m.get("Density"):
-                out["rho_kg_m3"] = qty(m["Density"], "kg/m^3")
-            return out
+            return material_values(o)
     return {}
 
 
@@ -579,6 +666,10 @@ def main():
     results = extract_result_values(res)
     disp = list(getattr(res, "DisplacementLengths", []) or [])
 
+    active_analysis, _solver, source_mesh = find_replay_context(doc, res, len(disp))
+    source_shape = linked_mesh_shape(source_mesh)
+    materials = extract_material_body_counts(active_analysis.Group, len(source_shape.Solids))
+
     # Mesh stats for the mesh-budget category. CRITICAL: tie the reported mesh to
     # the SOLVE, not to whatever mesh is attached to the result. A genuine result
     # carries exactly one displacement value per mesh node, so the mesh actually
@@ -633,6 +724,7 @@ def main():
         "geometrical_nonlinearity": nonlinearity,
         "units": {"length": "mm", "force": "N", "stress": "MPa"},
         "material": material,
+        "materials": materials,
         "geometry": geometry,
         "boundary_conditions": bcs,
         "loads": loads,

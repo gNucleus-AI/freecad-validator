@@ -1,7 +1,9 @@
 """Tests for the STEP + reference + candidate FEM validator."""
 
+import os
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -18,8 +20,10 @@ from freecad_validator.fem.step_interface import (
     FCSTD_ADAPTER,
     ExtractionError,
     _extract,
+    _preprocessing_gate_report,
     _run_adapter,
 )
+from freecad_validator.fem.topology_compare import topology_difference, topology_mismatches
 
 STEP = {"volume_mm3": 1.0e6, "characteristic_length_mm": 387.0, "bbox_mm": [120, 360, 60]}
 
@@ -579,8 +583,8 @@ def test_required_boolean_rejects_indistinguishable_reference_topology():
 
 
 def test_required_preprocessing_matching_label_geometry_gates_before_other_scoring():
-    input_geometry = {"volume_mm3": 1.0e6, "surface_area_mm2": 2.5e5}
-    matching_geometry = {"geometry": {"volume_mm3": 1.0e6, "surface_area_mm2": 2.5e5}}
+    input_geometry = _topology_geometry([1.0e6])
+    matching_geometry = {"geometry": _topology_geometry([1.0e6])}
     with TemporaryDirectory() as extract_dir:
         with patch(
             "freecad_validator.fem.step_interface._extract",
@@ -759,6 +763,27 @@ def test_adapter_timeout_terminates_process_tree(tmp_path):
     terminate.assert_called_once_with(process)
 
 
+def test_adapter_workers_isolate_and_clean_temp_directories(tmp_path):
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import json, os, pathlib, sys\n"
+        "root = pathlib.Path(os.environ['TMPDIR'])\n"
+        "assert root.is_dir()\n"
+        "assert os.environ['TEMP'] == os.environ['TMP'] == str(root)\n"
+        "(root / 'vtk_extract_datadir').mkdir()\n"
+        "pathlib.Path(sys.argv[-1]).write_text(json.dumps({'temp': str(root)}))\n",
+        encoding="utf-8",
+    )
+    original_tmp = os.environ.get("TMPDIR")
+    payloads = [
+        _run_adapter(sys.executable, str(worker), str(tmp_path / f"out{i}.json"), [], 10)
+        for i in range(2)
+    ]
+    assert payloads[0]["temp"] != payloads[1]["temp"]
+    assert all(not Path(payload["temp"]).exists() for payload in payloads)
+    assert os.environ.get("TMPDIR") == original_tmp
+
+
 def test_runtime_failure_is_not_scored_as_candidate_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "freecad_validator.fem.step_interface._runtime_preflight",
@@ -871,3 +896,196 @@ if __name__ == "__main__":
         fn()
         print("ok:", fn.__name__)
     print(f"{len(fns)} step-interface tests passed")
+
+
+def test_material_counts_are_compared_independently_of_first_material():
+    steel = {"E_MPa": 200000.0, "nu": 0.3, "rho_kg_m3": 7900.0, "body_count": 3}
+    aluminum = {"E_MPa": 70000.0, "nu": 0.35, "rho_kg_m3": 2700.0, "body_count": 2}
+    reference = {**LABEL, "materials": [steel, aluminum]}
+    candidate = _cand(material=aluminum, materials=[aluminum, steel])
+    report = score_trusted_payloads(STEP, reference, candidate)
+    assert report.subscores["problem_setup"] == 100
+    assert not report.gates_triggered
+
+    candidate["materials"] = [{**aluminum, "body_count": 3}, {**steel, "body_count": 2}]
+    report = score_trusted_payloads(STEP, reference, candidate)
+    assert report.overall_score == 0
+    assert any(f["code"] == FailureMode.WRONG_MATERIAL for f in report.failure_modes_detected)
+
+
+@pytest.mark.parametrize(
+    "property_name,invalid_value",
+    [
+        ("E_MPa", 0.0),
+        ("rho_kg_m3", -1.0),
+        ("nu", 0.8),
+        ("E_MPa", float("inf")),
+        ("rho_kg_m3", float("nan")),
+        ("nu", float("nan")),
+    ],
+)
+def test_every_material_card_must_be_physically_admissible(property_name, invalid_value):
+    steel = {"E_MPa": 200000.0, "nu": 0.3, "rho_kg_m3": 7900.0, "body_count": 1}
+    aluminum = {"E_MPa": 70000.0, "nu": 0.35, "rho_kg_m3": 2700.0, "body_count": 1}
+    reference = {**LABEL, "materials": [steel, aluminum]}
+    invalid_aluminum = {**aluminum, property_name: invalid_value}
+    report = score_trusted_payloads(
+        STEP,
+        reference,
+        _cand(material=steel, materials=[steel, invalid_aluminum]),
+    )
+    assert report.overall_score == 0
+    assert any(
+        finding["category"] == "physical_validity"
+        and finding["code"] == FailureMode.PHYSICALLY_IMPOSSIBLE
+        and "Material 2" in finding["evidence"]
+        for finding in report.failure_modes_detected
+    )
+
+
+def test_missing_material_counts_cannot_bypass_new_reference_check():
+    report = score_trusted_payloads(
+        STEP, {**LABEL, "materials": [{**LABEL["material"], "body_count": 1}]}, _cand()
+    )
+    assert report.overall_score == 0
+    assert any(f["code"] == FailureMode.WRONG_MATERIAL for f in report.failure_modes_detected)
+
+
+def test_tolerated_material_reordering_does_not_zero_a_correct_submission():
+    materials = [{"E_MPa": 200000.0, "body_count": 1}, {"E_MPa": 210000.0, "body_count": 2}]
+    candidate = [dict(materials[0]), {**materials[1], "E_MPa": 190000.0}]
+    report = score_trusted_payloads(
+        STEP, {**LABEL, "materials": materials}, _cand(materials=candidate)
+    )
+    assert report.overall_score >= 90
+    assert not report.gates_triggered
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"E_MPa": 190000.0},
+        {"rho_kg_m3": 7800.0},
+        {"nu": 0.31},
+    ],
+)
+def test_partial_material_variation_scores_like_uniform_variation(changes):
+    material = {**LABEL["material"], "rho_kg_m3": 7900.0, "body_count": 1}
+    reference = {**LABEL, "materials": [material, material]}
+    baseline = score_trusted_payloads(STEP, reference, _cand(materials=[material, material]))
+    for cards in ([material, {**material, **changes}], [{**material, **changes}] * 2):
+        report = score_trusted_payloads(STEP, reference, _cand(materials=cards))
+        assert report.overall_score == baseline.overall_score
+        assert report.subscores["problem_setup"] == 100
+        assert not report.gates_triggered
+
+
+def test_preprocessing_topology_changes_with_equal_volume_and_area_are_allowed():
+    source = _topology_geometry([0.4e6, 0.6e6])
+    partitioned_edge = deepcopy(source)
+    partitioned_edge["regions"][0]["num_edges"] += 2
+    partitioned_edge["num_edges"] += 2
+    split_solid = _topology_geometry([0.2e6, 0.2e6, 0.6e6])
+    changed_regions = _topology_geometry([0.45e6, 0.55e6])
+    for candidate in (partitioned_edge, split_solid, changed_regions):
+        assert candidate["volume_mm3"] == source["volume_mm3"]
+        assert candidate["surface_area_mm2"] == source["surface_area_mm2"]
+        assert _preprocessing_gate_report(source, candidate) is None
+
+
+def test_preprocessing_region_order_and_float_tolerance():
+    source = _topology_geometry([0.4e6, 0.6e6])
+    for relative_change, unchanged in ((1e-6, True), (2e-5, False)):
+        candidate = deepcopy(source)
+        candidate["regions"].reverse()
+        for geometry in [candidate, *candidate["regions"]]:
+            for field in ("volume_mm3", "surface_area_mm2"):
+                geometry[field] *= 1 + relative_change
+        report = _preprocessing_gate_report(source, candidate)
+        if unchanged:
+            assert report.overall_score == 0
+            assert report.gates_triggered == [{"reason": FailureMode.PREPROCESSING_NOT_PERFORMED}]
+        else:
+            assert report is None
+
+
+def test_preprocessing_region_matching_can_reassign_an_ambiguous_pair():
+    source = _topology_geometry([100.0009, 99.9991])
+    candidate = _topology_geometry([100.0, 100.0018])
+    for geometry in (source, candidate):
+        for region in geometry["regions"]:
+            region.update(surface_area_mm2=500.0, num_faces=6, num_edges=12)
+
+    # Source region 0 fits either candidate region, while source region 1 only
+    # fits candidate region 0. Greedy pairing used to consume region 0 first.
+    assert topology_difference(source, candidate) < 1.0
+    assert topology_mismatches(source, candidate) == []
+    report = _preprocessing_gate_report(source, candidate)
+    assert report.overall_score == 0
+    assert report.gates_triggered == [{"reason": FailureMode.PREPROCESSING_NOT_PERFORMED}]
+
+
+def test_preprocessing_uses_maximum_normalized_difference():
+    source = _topology_geometry([1.0e6])
+    candidate = deepcopy(source)
+    for geometry in (candidate, candidate["regions"][0]):
+        geometry["volume_mm3"] *= 1 + 0.6e-5
+        geometry["surface_area_mm2"] *= 1 + 0.8e-5
+
+    # Several differences inside tolerance must not add up to a change.
+    difference = topology_difference(source, candidate)
+    assert difference == pytest.approx(0.8, rel=1e-4)
+    report = _preprocessing_gate_report(source, candidate)
+    assert report.overall_score == 0
+    recorded = next(
+        item for item in report.evidence if item.startswith("preprocessing_max_normalized_diff:")
+    )
+    assert float(recorded.split(":")[1]) == pytest.approx(difference, rel=1e-5)
+
+
+def test_preprocessing_single_count_change_exceeds_normalized_threshold():
+    source = _topology_geometry([1.0e6])
+    source["num_edges"] = source["regions"][0]["num_edges"] = 100000
+    candidate = deepcopy(source)
+    candidate["num_edges"] += 1
+    candidate["regions"][0]["num_edges"] += 1
+    assert topology_difference(source, candidate) == 2.0
+    assert _preprocessing_gate_report(source, candidate) is None
+
+
+def test_preprocessing_missing_topology_cannot_establish_an_unchanged_match():
+    for missing_side in (0, 1):
+        geometries = [_topology_geometry([1.0e6]), _topology_geometry([1.0e6])]
+        del geometries[missing_side]["regions"]
+        with pytest.raises(ExtractionError, match="missing Boolean topology fields: regions"):
+            _preprocessing_gate_report(*geometries)
+
+
+def test_required_preprocessing_face_partition_continues_to_solver_verification():
+    source = _topology_geometry([1.0e6])
+    prepared = deepcopy(source)
+    prepared["num_faces"] += 1
+    prepared["num_edges"] += 2
+    prepared["regions"][0]["num_faces"] += 1
+    prepared["regions"][0]["num_edges"] += 2
+    label = {**LABEL, "geometry": prepared}
+    candidate = _cand(geometry=prepared)
+    with TemporaryDirectory() as extract_dir:
+        with patch(
+            "freecad_validator.fem.step_interface._extract",
+            side_effect=[source, {"geometry": prepared}, label, candidate],
+        ) as extract:
+            report = score_step_fcstd(
+                "source.step",
+                "reference.FCStd",
+                "candidate.FCStd",
+                freecad_cmd="/fake/freecadcmd",
+                extract_dir=extract_dir,
+                require_preprocessing=True,
+            )
+
+    assert report.overall_score > 0
+    assert report.gates_triggered == []
+    assert len(extract.call_args_list) == 4
+    assert extract.call_args_list[-1].kwargs["extra_args"] == ["verify-solve"]
+    assert any("reference FCStd geometry target" in item for item in report.evidence)
