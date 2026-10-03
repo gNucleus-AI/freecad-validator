@@ -12,7 +12,6 @@ REPLAY_SCALAR_FIELDS = (
     "vonMises",
     "MaxShear",
     "Temperature",
-    "EigenmodeFrequencies",
 )
 STATIC_REQUIRED_REPLAY_FIELDS = (
     "DisplacementLengths",

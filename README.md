@@ -235,6 +235,14 @@ candidate solve with CalculiX, verifies the stored displacement and stress
 fields, and returns a deterministic 0–100 report with validity gates and
 engineering diagnostics.
 
+Mesh-budget scoring uses the saved solve's node count. A positive count at or below
+the inclusive task cap receives full mesh-budget credit; exceeding the cap makes
+the overall result invalid. Set `max_node_count` in the API or `--max-node-count`
+in the CLI to use the task's stated ceiling. Without an explicit cap, the default
+is 1.3 times the reference node count, rounded up to a whole thousand. The
+`mesh_budget_zero_ratio` / `--mesh-budget-ratio` option controls that default
+multiplier; it no longer defines an element-count scoring curve.
+
 Material validation compares all extracted material cards and the number of solids
 assigned to each, allowing equivalent cards to be split or merged. It checks every
 card for physically invalid properties. Assignment matching compares counts, not
@@ -245,7 +253,7 @@ payloads without this list on the reference retain the single-`material` compari
 ```python
 from freecad_validator.fem import FEMValidator
 
-validator = FEMValidator(require_boolean=True)
+validator = FEMValidator(require_boolean=True, max_node_count=26000)
 report = validator.validate(
     step_path="source.step",
     reference_fcstd="reference.FCStd",
@@ -270,7 +278,7 @@ The equivalent CLI is:
 
 ```bash
 freecad-validator fem-score source.step reference.FCStd candidate.FCStd \
-  --timeout 900 --json
+  --max-node-count 26000 --timeout 900 --json
 ```
 
 Use `--require-boolean` only for tasks whose metadata explicitly requires a
@@ -283,6 +291,11 @@ The preprocessing gate treats geometry as unchanged only when volume, surface
 area, and topology all match. Face or region partitions can therefore satisfy
 preprocessing even when volume and area are preserved. Region comparisons use
 one-to-one matching within tolerance and do not depend on region ordering.
+
+Geometry extraction treats a shape and the same shape inside one-child Compound
+wrappers as equivalent. Compounds with multiple children retain their container
+checks. Global face and edge counts count shared topology once per analyzed shape,
+so Boolean-imprinted interfaces can be distinguished from the raw geometry.
 
 > [!WARNING]
 > FEM validation executes FreeCAD and CalculiX subprocesses against the

@@ -12,7 +12,7 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
-from freecad_validator.fem.schema import MESH_BUDGET_ZERO_RATIO, TOL_BAND_HI, TOL_BAND_LO
+from freecad_validator.fem.schema import TOL_BAND_HI, TOL_BAND_LO
 
 
 # --------------------------------------------------------------------------- #
@@ -119,30 +119,6 @@ def mesh_quality_score(quality: dict[str, float]) -> tuple[float, list[str]]:
         score -= min(20.0, pct_ar * 1.0)
 
     return max(0.0, score), notes
-
-
-def mesh_budget_score(
-    candidate_elements: float, baseline_elements: float, zero_at: float = MESH_BUDGET_ZERO_RATIO
-) -> float:
-    """Mesh-efficiency score against a baseline element count from the reference.
-
-    full marks (100) at or below the baseline; linearly decaying to 0 once the
-    candidate reaches ``zero_at`` x the baseline (default 130%). Using fewer
-    elements than the baseline is never penalised.
-
-        r = candidate / baseline
-        r <= 1.0       -> 100
-        1.0 < r < z    -> 100 * (z - r) / (z - 1)
-        r >= z         -> 0
-    """
-    if not baseline_elements or baseline_elements <= 0:
-        return 100.0
-    r = candidate_elements / baseline_elements
-    if r <= 1.0:
-        return 100.0
-    if r >= zero_at:
-        return 0.0
-    return 100.0 * (zero_at - r) / (zero_at - 1.0)
 
 
 # --------------------------------------------------------------------------- #

@@ -36,6 +36,7 @@ class FEMValidator:
     require_preprocessing: bool = False
     require_boolean: bool = False
     timeout_seconds: float = DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+    max_node_count: int | None = None
 
     def __post_init__(self) -> None:
         tolerances = {
@@ -50,6 +51,10 @@ class FEMValidator:
             raise ValueError("mesh_budget_zero_ratio must be greater than 1.0")
         if self.timeout_seconds <= 0.0:
             raise ValueError("timeout_seconds must be positive")
+        if self.max_node_count is not None and (
+            type(self.max_node_count) is not int or self.max_node_count <= 0
+        ):
+            raise ValueError("max_node_count must be a positive integer")
 
     def validate(
         self,
@@ -72,6 +77,7 @@ class FEMValidator:
             require_preprocessing=self.require_preprocessing,
             require_boolean=self.require_boolean,
             timeout_seconds=self.timeout_seconds,
+            max_node_count=self.max_node_count,
         )
 
     def validate_trusted_payloads(
@@ -96,4 +102,5 @@ class FEMValidator:
             gross_tol=self.gross_error_tolerance,
             mesh_budget_zero_ratio=self.mesh_budget_zero_ratio,
             geometry_source=geometry_source,
+            max_node_count=self.max_node_count,
         )

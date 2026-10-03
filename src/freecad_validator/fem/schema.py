@@ -24,6 +24,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from freecad_validator.fem.mesh_budget import MESH_BUDGET_ZERO_RATIO as MESH_BUDGET_ZERO_RATIO
+
 # --------------------------------------------------------------------------- #
 # Scoring categories and the default weighting scheme (documented in report)   #
 # --------------------------------------------------------------------------- #
@@ -57,7 +59,7 @@ SEVERITY_PENALTY = {"info": 0.0, "minor": 8.0, "major": 30.0, "critical": 80.0}
 # Tolerance / accuracy-band configuration (correlated: change one, rest follow)#
 # --------------------------------------------------------------------------- #
 # Relative-error tolerances for comparing a candidate result to the reference.
-DISP_TOL = 0.05  # displacement / natural frequency: <= 5% rel. err = full credit
+DISP_TOL = 0.05  # displacement: <= 5% rel. err = full credit
 STRESS_TOL = 0.08  # stresses (mesh-sensitive): <= 8% rel. err = full credit
 
 # Accuracy band shape used by metrics.tolerance_band_score:
@@ -75,17 +77,6 @@ TOL_BAND_HI = 2.0
 # rather than tracking TOL_BAND_HI (default = 4 * 0.05 = 0.20).
 GROSS_GATE_MULT = 4.0
 GROSS_TOL = GROSS_GATE_MULT * DISP_TOL
-
-# Mesh-budget: candidate element count vs the reference baseline. Full credit at or
-# below the baseline; zero credit at this multiple of it.
-MESH_BUDGET_ZERO_RATIO = 1.3
-
-# Lower floor for the mesh-budget credit. A mesh below this fraction of the reference
-# baseline is too coarse to have resolved the field and earns ZERO mesh-budget
-# credit (not full), preventing a degenerate mesh from receiving efficiency
-# credit. Deliberately small so honest
-# coarse-but-valid meshes are spared while degenerate ones are excluded.
-MESH_BUDGET_FLOOR_RATIO = 0.05
 
 # Load match: how closely the candidate's applied loading must reproduce the reference.
 # A load is an INPUT (given in the prompt or derived from the environment), so it
@@ -126,7 +117,6 @@ class FailureMode:
     INTERNAL_INCONSISTENCY = "INTERNAL_INCONSISTENCY"
     PHYSICALLY_IMPOSSIBLE = "PHYSICALLY_IMPOSSIBLE"
     SINGULARITY_MISINTERPRETED = "SINGULARITY_MISINTERPRETED"
-    FREQ_NONPHYSICAL = "FREQ_NONPHYSICAL"
     BUCKLING_NONPHYSICAL = "BUCKLING_NONPHYSICAL"
     ACCURACY_GROSS_ERROR = "ACCURACY_GROSS_ERROR"
     NON_REPRODUCIBLE = "NON_REPRODUCIBLE"
@@ -135,6 +125,7 @@ class FailureMode:
     GEOMETRY_MISMATCH = "GEOMETRY_MISMATCH"
     PREPROCESSING_NOT_PERFORMED = "PREPROCESSING_NOT_PERFORMED"
     BOOLEAN_NOT_PERFORMED = "BOOLEAN_NOT_PERFORMED"
+    MESH_BUDGET_INVALID = "MESH_BUDGET_INVALID"
 
 
 # Critical (gate) failure modes. The scorer is a VALIDITY GATE: if any of these
@@ -149,6 +140,7 @@ CRITICAL_GATES: frozenset = frozenset(
         FailureMode.GEOMETRY_MISMATCH,
         FailureMode.PREPROCESSING_NOT_PERFORMED,
         FailureMode.BOOLEAN_NOT_PERFORMED,
+        FailureMode.MESH_BUDGET_INVALID,
         FailureMode.HALLUCINATED_SOLVER_OUTPUT,
         FailureMode.UNVERIFIED_SOLVER_OUTPUT,
         FailureMode.MISSING_RESULTS,
@@ -162,7 +154,6 @@ CRITICAL_GATES: frozenset = frozenset(
         FailureMode.NON_REPRODUCIBLE,
         FailureMode.WRONG_ANALYSIS_TYPE,
         FailureMode.INTERNAL_INCONSISTENCY,
-        FailureMode.FREQ_NONPHYSICAL,
         FailureMode.BUCKLING_NONPHYSICAL,
         FailureMode.WRONG_MATERIAL,
         FailureMode.ACCURACY_GROSS_ERROR,
@@ -205,7 +196,7 @@ class CaseDefinition:
     title: str
     category: str = "base"  # caller-defined grouping, e.g. "base" or "fem"
     subtype: str = ""
-    analysis_type: str = "static"  # static|modal|buckling|thermal|thermal_mechanical|nonlinear_material|large_deformation|contact|transient
+    analysis_type: str = "static"  # static|buckling|thermal|thermal_mechanical|nonlinear_material|large_deformation|contact|transient
     description: str = ""
     units_expected: dict[str, str] = field(default_factory=dict)
     geometry: dict[str, Any] = field(default_factory=dict)

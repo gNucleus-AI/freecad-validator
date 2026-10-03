@@ -30,7 +30,6 @@ _ALIASES = {
     "max_von_mises_MPa": ["max_stress_MPa", "peak_von_mises_MPa", "sigma_vm_max_MPa"],
     "max_hoop_stress_MPa": ["sigma_theta_max_MPa", "hoop_stress_MPa", "circumferential_stress_MPa"],
     "max_principal_stress_MPa": ["s1_max_MPa", "max_principal_MPa"],
-    "first_natural_frequency_Hz": ["f1_Hz", "fundamental_frequency_Hz", "natural_frequency_Hz"],
     "buckling_factor": ["load_factor", "buckling_load_factor", "critical_load_factor"],
     "max_temperature_C": ["Tmax_C", "peak_temperature_C"],
     "reaction_force_N": ["total_reaction_N"],
@@ -43,11 +42,6 @@ def _lookup(results: dict[str, Any], name: str) -> float | None:
     for alt in _ALIASES.get(name, []):
         if alt in results and isinstance(results[alt], (int, float)):
             return float(results[alt])
-    # special case: first natural frequency from a list
-    if name == "first_natural_frequency_Hz":
-        fl = results.get("natural_frequencies_Hz")
-        if isinstance(fl, list) and fl and isinstance(fl[0], (int, float)):
-            return float(fl[0])
     return None
 
 

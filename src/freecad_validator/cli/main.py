@@ -452,7 +452,7 @@ def _add_fem_score_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--freecad-cmd", help="path or command name for FreeCAD 1.1.0 freecadcmd")
     p.add_argument("--extract-dir", help="retain intermediate extraction JSON in this directory")
     p.add_argument(
-        "--disp-tol", type=float, default=DISP_TOL, help="relative displacement/frequency tolerance"
+        "--disp-tol", type=float, default=DISP_TOL, help="relative displacement tolerance"
     )
     p.add_argument("--stress-tol", type=float, default=STRESS_TOL, help="relative stress tolerance")
     p.add_argument(
@@ -465,7 +465,12 @@ def _add_fem_score_args(p: argparse.ArgumentParser) -> None:
         "--mesh-budget-ratio",
         type=float,
         default=MESH_BUDGET_ZERO_RATIO,
-        help="element-count ratio at which mesh-budget credit reaches zero",
+        help="reference-node multiplier for the default cap, rounded up to a thousand",
+    )
+    p.add_argument(
+        "--max-node-count",
+        type=int,
+        help="inclusive task node cap; overrides the default reference-based cap",
     )
     p.add_argument(
         "--require-preprocessing",
@@ -502,6 +507,7 @@ def _run_fem_score(args: argparse.Namespace) -> int:
         require_preprocessing=args.require_preprocessing,
         require_boolean=args.require_boolean,
         timeout_seconds=args.timeout,
+        max_node_count=args.max_node_count,
     )
     report = validator.validate(
         step_path=args.step_path,
