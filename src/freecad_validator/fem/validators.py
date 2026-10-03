@@ -16,14 +16,13 @@ import math
 from typing import Any
 
 from freecad_validator.fem import metrics
+from freecad_validator.fem.mesh_budget import node_budget_score
 from freecad_validator.fem.schema import (
     LOAD_DIR_ALIGNED_DEG,
     LOAD_DIR_GATE_DEG,
     LOAD_LOC_TOL,
     LOAD_MAG_GROSS_TOL,
     LOAD_MAG_TOL,
-    MESH_BUDGET_FLOOR_RATIO,
-    MESH_BUDGET_ZERO_RATIO,
     CaseDefinition,
     FailureMode,
     Finding,
@@ -90,25 +89,35 @@ def _score_from(findings: list[Finding]) -> float:
     return max(0.0, 100.0 - sum(f.penalty for f in findings))
 
 
-def _norm_analysis(a: str) -> str:
-    a = (a or "").lower()
-    if "modal" in a or "frequency" in a or "eigen" in a or "vibrat" in a:
-        return "modal"
-    if "buckl" in a:
-        return "buckling"
-    if "thermal" in a and "mech" in a:
-        return "thermal_mechanical"
-    if "thermal" in a or "heat" in a:
-        return "thermal"
-    if "transient" in a or "dynamic" in a or "explicit" in a:
-        return "transient"
-    if "nonlinear" in a and ("mat" in a or "plast" in a):
-        return "nonlinear_material"
-    if "large" in a or "geom" in a:
-        return "large_deformation"
-    if "static" in a or "linear" in a or "stress" in a:
-        return "static"
-    return a or "static"
+_ANALYSIS_ALIASES = {
+    "": "static",
+    "static": "static",
+    "linear": "static",
+    "stress": "static",
+    "linear_static": "static",
+    "static_structural": "static",
+    "buckling": "buckling",
+    "thermal": "thermal",
+    "heat": "thermal",
+    "heat_transfer": "thermal",
+    "thermal_mechanical": "thermal_mechanical",
+    "thermomechanical": "thermal_mechanical",
+    "thermomech": "thermal_mechanical",
+    "transient": "transient",
+    "dynamic": "transient",
+    "explicit": "transient",
+    "nonlinear_material": "nonlinear_material",
+    "nonlinear_plasticity": "nonlinear_material",
+    "large_deformation": "large_deformation",
+    "geometric_nonlinearity": "large_deformation",
+    "geometrical_nonlinearity": "large_deformation",
+    "contact": "contact",
+}
+
+
+def _norm_analysis(a: str) -> str | None:
+    key = (a or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return _ANALYSIS_ALIASES.get(key)
 
 
 def _dist(a: list[float], b: list[float]) -> float:
@@ -406,7 +415,18 @@ def validate_problem_setup(case: CaseDefinition, sub: Submission) -> tuple[float
     # analysis type ---------------------------------------------------------
     want = _norm_analysis(case.analysis_type)
     got = _norm_analysis(sub.analysis_type)
-    if not sub.analysis_type:
+    if want is None or got is None:
+        findings.append(
+            Finding(
+                cat,
+                FailureMode.WRONG_ANALYSIS_TYPE,
+                "critical",
+                f"Unsupported FEM analysis type: required={case.analysis_type!r}, "
+                f"submitted={sub.analysis_type!r}.",
+                penalty=80,
+            )
+        )
+    elif not sub.analysis_type:
         findings.append(
             Finding(
                 cat,
@@ -465,7 +485,7 @@ def validate_problem_setup(case: CaseDefinition, sub: Submission) -> tuple[float
     findings.extend(compare_restraints(case.expected_bcs, sub.boundary_conditions, needs_restraint))
 
     expects_load = len(case.expected_loads) > 0
-    if expects_load and not sub.loads and want not in ("modal",):
+    if expects_load and not sub.loads:
         findings.append(
             Finding(
                 cat,
@@ -979,54 +999,6 @@ def evaluate_physical(case: CaseDefinition, sub: Submission) -> tuple[float, lis
                     )
                 )
 
-    # modal
-    if want == "modal":
-        freqs = res.get("natural_frequencies_Hz")
-        free_free = not case.expected_bcs
-        if not freqs:
-            findings.append(
-                Finding(
-                    cat,
-                    FailureMode.MISSING_RESULTS,
-                    "critical",
-                    "Modal analysis but no natural frequencies reported.",
-                    penalty=85,
-                )
-            )
-        else:
-            nums = [f for f in freqs if isinstance(f, (int, float))]
-            if any((not math.isfinite(f)) or f < -1e-3 for f in nums):
-                findings.append(
-                    Finding(
-                        cat,
-                        FailureMode.FREQ_NONPHYSICAL,
-                        "critical",
-                        "Negative or non-finite natural frequency.",
-                        penalty=85,
-                    )
-                )
-            elif not free_free and nums and min(nums) <= 1e-3:
-                findings.append(
-                    Finding(
-                        cat,
-                        FailureMode.FREQ_NONPHYSICAL,
-                        "critical",
-                        "Near-zero fundamental frequency in a constrained model "
-                        "indicates an unconstrained rigid-body mode.",
-                        penalty=80,
-                    )
-                )
-            if nums and nums != sorted(nums):
-                findings.append(
-                    Finding(
-                        cat,
-                        "FREQ_NOT_ASCENDING",
-                        "minor",
-                        "Natural frequencies are not in ascending order.",
-                        penalty=8,
-                    )
-                )
-
     # buckling
     if want == "buckling":
         bf = _num(res, "buckling_factor", "load_factor", "buckling_load_factor")
@@ -1298,69 +1270,28 @@ def validate_geometry_fidelity(case: CaseDefinition, sub: Submission) -> list[Fi
 def evaluate_mesh_budget(
     case: CaseDefinition, sub: Submission
 ) -> tuple[float | None, list[Finding]]:
-    """Mesh-efficiency category: candidate element count vs a baseline.
+    """Apply the node policy to an explicit reference baseline and cap.
 
-    The baseline (for example, the reference element count) is carried on
-    ``case.mesh_expectations["baseline_num_elements"]``; the ceiling ratio is
-    ``budget_zero_ratio`` (default 1.3). Returns ``(score_0_100, findings)`` or
-    ``(None, [])`` when no baseline is available (so the weight is redistributed).
-    Findings carry penalty 0 because the *score* already encodes the deduction.
+    General cases without a budget remain N/A. STEP+label cases always carry a
+    baseline and cap: invalid references raise, invalid candidates gate to zero.
     """
-    baseline = case.mesh_expectations.get("baseline_num_elements")
-    if not baseline:
+    if "baseline_num_nodes" not in case.mesh_expectations:
         return None, []
-    cand = (sub.mesh or {}).get("num_elements")
-    if not cand:
-        return None, []
-    zero_at = case.mesh_expectations.get("budget_zero_ratio", MESH_BUDGET_ZERO_RATIO)
-    floor_ratio = case.mesh_expectations.get("budget_floor_ratio", MESH_BUDGET_FLOOR_RATIO)
-    ratio = cand / baseline
-    findings: list[Finding] = []
-    # Lower floor: a mesh far below the baseline is too coarse to have resolved the
-    # field. Deny the efficiency credit so a real solve cannot be paired with a
-    # A trivial mesh must not receive the mesh-budget efficiency share; going
-    # coarser is only "efficient" down to a point, below which it is under-resolved.
-    if cand < floor_ratio * baseline:
-        findings.append(
+    baseline = case.mesh_expectations.get("baseline_num_nodes")
+    cand = (sub.mesh or {}).get("num_nodes")
+    cap = case.mesh_expectations.get("max_node_count")
+    score, status = node_budget_score(cand, baseline, cap)
+    evidence = f"candidate={cand}, reference={baseline}, cap={cap} nodes"
+    if status == "invalid":
+        return score, [
             Finding(
                 "mesh_budget",
-                "MESH_BUDGET_UNDERRESOLVED",
-                "major",
-                f"Candidate mesh has {cand} elements = {ratio * 100:.2f}% of the reference "
-                f"baseline ({baseline}); below the {floor_ratio * 100:.0f}% floor a mesh "
-                "is too coarse to have resolved the field, so the mesh-budget sub-score "
-                "is 0 (a degenerate mesh cannot receive efficiency credit for a real "
-                "solve).",
-                penalty=0,
+                "MESH_BUDGET_INVALID",
+                "critical",
+                "Solved-mesh node count must be positive and within the task ceiling. " + evidence,
             )
-        )
-        return 0.0, findings
-    score = metrics.mesh_budget_score(cand, baseline, zero_at)
-    if score <= 0.0:
-        findings.append(
-            Finding(
-                "mesh_budget",
-                "MESH_BUDGET_EXCEEDED",
-                "major",
-                f"Candidate mesh has {cand} elements = {ratio * 100:.0f}% of the reference "
-                f"baseline ({baseline}); at/over {zero_at * 100:.0f}% the mesh-budget "
-                "sub-score is 0.",
-                penalty=0,
-            )
-        )
-    elif score < 100.0:
-        findings.append(
-            Finding(
-                "mesh_budget",
-                "MESH_BUDGET_OVER",
-                "minor",
-                f"Candidate mesh has {cand} elements = {ratio * 100:.0f}% of the reference "
-                f"baseline ({baseline}); over budget -> mesh-budget sub-score "
-                f"{score:.0f}/100.",
-                penalty=0,
-            )
-        )
-    return score, findings
+        ]
+    return score, []
 
 
 def reproducibility_status(sub: Submission) -> str:

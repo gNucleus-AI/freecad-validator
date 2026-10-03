@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from freecad_validator._freecad_loader import resolve_freecad_command
+from freecad_validator.fem.mesh_budget import default_node_cap
 from freecad_validator.fem.schema import (
     DISP_TOL,
     GROSS_TOL,
@@ -74,8 +75,8 @@ DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 900.0
 DIAGNOSTIC_TAIL_CHARACTERS = 16_000
 
 
-# Accuracy-vs-reference is the largest single weight; mesh_budget (candidate element
-# count vs the reference's) is a deliberate 25% efficiency factor. A raw FCStd carries
+# Accuracy-vs-reference is the largest single weight; mesh_budget (solved nodes
+# within the task cap) is a 25% factor. A raw FCStd carries
 # no report/convergence study, so those stay at 0.
 PREPROCESSING_VOLUME_REL_TOL = 1e-3
 PREPROCESSING_SURFACE_AREA_REL_TOL = 1e-2
@@ -238,7 +239,7 @@ def _boolean_gate_report(
 
 STEP_WEIGHTS = {
     "accuracy_vs_reference": 0.35,
-    "mesh_budget": 0.25,  # candidate elements vs reference baseline (0 at >=130%)
+    "mesh_budget": 0.25,  # positive solved-node count at or below the task cap
     "problem_setup": 0.15,  # incl. geometry fidelity + analysis/material/BC/load match
     "physical_validity": 0.15,
     "numerical_reliability": 0.05,
@@ -273,14 +274,6 @@ def _reference_quantities(
             "tol_rel": stress_tol,
             "critical": False,
         }
-    freqs = res.get("natural_frequencies_Hz")
-    if freqs:
-        q["first_natural_frequency_Hz"] = {
-            "value": freqs[0],
-            "unit": "Hz",
-            "tol_rel": disp_tol,
-            "critical": True,
-        }
     return q
 
 
@@ -292,10 +285,12 @@ def build_case(
     gross_tol: float = GROSS_TOL,
     mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
     case_id: str = "step+reference+candidate",
+    max_node_count: int | None = None,
 ) -> CaseDefinition:
     """Build from target geometry and an engineer-generated reference.
 
-    The reference element count is the mesh-budget baseline.
+    Without an explicit task cap, use reference nodes times the budget ratio,
+    rounded up to a whole thousand.
     """
     geometry = {
         k: target_geom[k]
@@ -303,10 +298,13 @@ def build_case(
         if k in target_geom
     }
     mesh_exp: dict[str, Any] = {"expect_convergence": False}
-    baseline = (reference_sub.get("mesh") or {}).get("num_elements")
-    if baseline:
-        mesh_exp["baseline_num_elements"] = baseline
-        mesh_exp["budget_zero_ratio"] = mesh_budget_zero_ratio
+    baseline = (reference_sub.get("mesh") or {}).get("num_nodes")
+    mesh_exp["baseline_num_nodes"] = baseline
+    mesh_exp["max_node_count"] = (
+        default_node_cap(baseline, mesh_budget_zero_ratio)
+        if max_node_count is None
+        else max_node_count
+    )
     return CaseDefinition(
         case_id=case_id,
         title="geometry + reference + candidate evaluation",
@@ -340,6 +338,7 @@ def score_trusted_payloads(
     gross_tol: float = GROSS_TOL,
     mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
     geometry_source: str = "STEP",
+    max_node_count: int | None = None,
 ) -> ScoringReport:
     """Score validator-generated extraction payloads without FreeCAD.
 
@@ -348,7 +347,13 @@ def score_trusted_payloads(
     candidate-controlled JSON here; replay-verification fields are trusted.
     """
     case = build_case(
-        target_geom, reference_sub, disp_tol, stress_tol, gross_tol, mesh_budget_zero_ratio
+        target_geom,
+        reference_sub,
+        disp_tol,
+        stress_tol,
+        gross_tol,
+        mesh_budget_zero_ratio,
+        max_node_count=max_node_count,
     )
     sub = Submission.from_dict({**candidate_sub, "case_id": case.case_id})
     report = score_result(case, sub)
@@ -365,15 +370,13 @@ def score_trusted_payloads(
         report.evidence.insert(
             1, f"geometry_fidelity: target_volume={sv:.0f} mm^3, candidate_volume={fv:.0f} mm^3"
         )
-    base_n = (reference_sub.get("mesh") or {}).get("num_elements")
-    cand_n = (candidate_sub.get("mesh") or {}).get("num_elements")
-    if base_n and cand_n:
-        report.evidence.insert(
-            2,
-            f"mesh_budget: candidate={cand_n} elements vs reference baseline="
-            f"{base_n} ({cand_n / base_n * 100:.0f}%; 0 at "
-            f"{mesh_budget_zero_ratio * 100:.0f}%)",
-        )
+    base_n = (reference_sub.get("mesh") or {}).get("num_nodes")
+    cand_n = (candidate_sub.get("mesh") or {}).get("num_nodes")
+    report.evidence.insert(
+        2,
+        f"mesh_budget: candidate={cand_n} nodes vs reference baseline={base_n}; "
+        f"cap={case.mesh_expectations['max_node_count']} nodes",
+    )
     return report
 
 
@@ -543,6 +546,7 @@ def _score_step_fcstd(
     require_boolean: bool,
     timeout_seconds: float,
     runtime_provenance: dict[str, Any],
+    max_node_count: int | None,
 ) -> ScoringReport:
     fc = freecad_cmd
     os.makedirs(extract_dir, exist_ok=True)
@@ -638,6 +642,7 @@ def _score_step_fcstd(
         gross_tol,
         mesh_budget_zero_ratio,
         geometry_source,
+        max_node_count=max_node_count,
     )
     report.runtime_provenance = dict(runtime_provenance)
     return report
@@ -656,6 +661,7 @@ def score_step_fcstd(
     require_preprocessing: bool = False,
     require_boolean: bool = False,
     timeout_seconds: float = DEFAULT_SUBPROCESS_TIMEOUT_SECONDS,
+    max_node_count: int | None = None,
 ) -> ScoringReport:
     """Extract and score one candidate against an engineer reference.
 
@@ -683,6 +689,7 @@ def score_step_fcstd(
             require_boolean,
             timeout_seconds,
             runtime_provenance,
+            max_node_count,
         )
     with tempfile.TemporaryDirectory(prefix="freecad-validator-fem-") as temp_dir:
         runtime_provenance = _runtime_preflight(fc, temp_dir, timeout_seconds)
@@ -700,4 +707,5 @@ def score_step_fcstd(
             require_boolean,
             timeout_seconds,
             runtime_provenance,
+            max_node_count,
         )

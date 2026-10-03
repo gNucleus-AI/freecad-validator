@@ -33,7 +33,7 @@ from freecad_validator.fem.schema import (
 
 # Actionable fix suggestions keyed by failure-mode / finding code.
 SUGGESTED_FIXES = {
-    "WRONG_ANALYSIS_TYPE": "Re-run with the analysis type the case requires (e.g. modal/buckling/thermal), not a static stress pass.",
+    "WRONG_ANALYSIS_TYPE": "Use a supported analysis type matching the case definition.",
     "UNIT_INCONSISTENCY": "Make the unit system self-consistent (e.g. N-mm-MPa) and state it explicitly.",
     "WRONG_MATERIAL": "Use the specified material properties (E, nu, density) from the case definition.",
     "MISSING_BOUNDARY_CONDITION": "Add restraints that remove all six rigid-body modes before solving.",
@@ -51,7 +51,6 @@ SUGGESTED_FIXES = {
     "INTERNAL_INCONSISTENCY": "Make every reported value identical across text, tables and plots.",
     "PHYSICALLY_IMPOSSIBLE": "Re-examine the model: the result violates basic physics (sign, magnitude, admissibility).",
     "SINGULARITY_MISINTERPRETED": "Treat the sharp feature as a singularity (add a fillet or report a notch-stress/away-from-singularity value), not a converged peak.",
-    "FREQ_NONPHYSICAL": "Negative/zero constrained frequencies imply rigid-body modes; fix constraints.",
     "BUCKLING_NONPHYSICAL": "A non-positive buckling factor is invalid; check the eigenvalue extraction and preload.",
     "ACCURACY_GROSS_ERROR": "Reconcile the result with the analytical/reference value; a large gap signals a setup error.",
     "NON_REPRODUCIBLE": "Ship the input deck/script and result file so the run can be reproduced and audited.",
@@ -61,9 +60,7 @@ SUGGESTED_FIXES = {
     "INCOMPLETE_REPORT": "Add the missing report sections (assumptions, interpretation, limitations, etc.).",
     "MESH_NOT_CONVERGED": "Refine until the quantity of interest changes < ~3% between meshes.",
     "LARGE_DEFLECTION": "Switch to geometrically nonlinear analysis; linear small-strain theory is invalid here.",
-    "MESH_BUDGET_EXCEEDED": "Reduce the element count to within the reference mesh budget (the sub-score is 0 at/over the budget ceiling); coarsen away from high-gradient regions or use local refinement only where needed.",
-    "MESH_BUDGET_OVER": "Trim the element count toward the reference baseline to recover mesh-budget points.",
-    "MESH_BUDGET_UNDERRESOLVED": "Report the mesh you actually solved on; a mesh far below the reference baseline is under-resolved and earns no mesh-budget credit. Refine until the field is resolved, then trim toward (not below) the baseline.",
+    "MESH_BUDGET_INVALID": "Save the mesh actually solved on with a positive node count at or below the task ceiling.",
 }
 
 
@@ -200,7 +197,6 @@ def score_result(case: CaseDefinition, submission: Submission) -> ScoringReport:
         and "REACTION_IMBALANCE" not in crit_codes
         and "INTERNAL_INCONSISTENCY" not in crit_codes,
         "physically_valid": "PHYSICALLY_IMPOSSIBLE" not in crit_codes
-        and "FREQ_NONPHYSICAL" not in crit_codes
         and "BUCKLING_NONPHYSICAL" not in crit_codes,
         "accurate_vs_reference": accuracy_applicable
         and all(c["within_tol"] for c in comparisons if c["critical"])
@@ -282,9 +278,7 @@ _KNOWN_FAILURE_CODES = set(CRITICAL_GATES) | {
     "UNDER_RESOLVED",
     "MATERIAL_NOT_STATED",
     "BC_COUNT_LOW",
-    "MESH_BUDGET_EXCEEDED",
-    "MESH_BUDGET_OVER",
-    "MESH_BUDGET_UNDERRESOLVED",
+    "MESH_BUDGET_INVALID",
 }
 
 

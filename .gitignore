@@ -38,3 +38,5 @@ _build/
 *.FCBak
 test-data/
 opensource-v2-design.md
+improve.md
+data/

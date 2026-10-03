@@ -841,53 +841,157 @@ def test_adapter_import_does_not_initialize_package(tmp_path):
     assert completed.stdout.strip() == ("[fcstd_adapter] pure replay module loaded")
 
 
-# --- mesh-budget category (candidate #elements vs label baseline) ---------- #
+# --- Inclusive node-budget checks ---
 def test_mesh_budget_active_with_label():
-    rep = score_trusted_payloads(STEP, LABEL, _cand())  # 12000 == baseline 12000
+    rep = score_trusted_payloads(STEP, LABEL, _cand())  # 20000 == baseline 20000
     assert rep.subscores_details["mesh_budget"]["weight"] == 0.25
     assert rep.subscores["mesh_budget"] == 100.0  # at/below baseline -> full
 
 
-def test_mesh_budget_fewer_elements_not_penalised():
-    rep = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_elements": 6000}))
+def test_mesh_budget_fewer_nodes_not_penalised():
+    rep = score_trusted_payloads(
+        STEP, LABEL, _cand(mesh={"num_nodes": 10000, "num_elements": 12000})
+    )
     assert rep.subscores["mesh_budget"] == 100.0
 
 
-def test_mesh_budget_partial_when_over():
-    # 12000 * 1.15 = 13800 -> halfway to the 130% ceiling -> ~50
-    rep = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_elements": 13800}))
-    assert 45 <= rep.subscores["mesh_budget"] <= 55
+def test_mesh_budget_full_when_above_reference_but_within_cap():
+    rep = score_trusted_payloads(
+        STEP, LABEL, _cand(mesh={"num_nodes": 23000, "num_elements": 12000})
+    )
+    assert rep.subscores["mesh_budget"] == 100.0
+    assert rep.pass_fail_flags["mesh_within_budget"] is True
+    assert any("candidate=23000 nodes vs reference baseline=20000" in item for item in rep.evidence)
+    assert rep.subscores_details["mesh_budget"]["findings"] == []
+
+
+@pytest.mark.parametrize("nodes", [26000, 26001, 28000])
+def test_mesh_budget_cap_is_inclusive(nodes):
+    rep = score_trusted_payloads(
+        STEP, LABEL, _cand(mesh={"num_nodes": nodes, "num_elements": 12000})
+    )
+    assert rep.subscores["mesh_budget"] == (100.0 if nodes == 26000 else 0.0)
+    assert any(f["code"] == "MESH_BUDGET_INVALID" for f in rep.failure_modes_detected) is (
+        nodes > 26000
+    )
+    assert bool(rep.gates_triggered) is (nodes > 26000)
+    if nodes > 26000:
+        assert rep.overall_score == 0
+    assert rep.pass_fail_flags["mesh_within_budget"] is (nodes == 26000)
+
+
+def test_mesh_budget_at_cap_has_same_total_as_reference():
+    full = score_trusted_payloads(STEP, LABEL, _cand()).overall_score
+    over = score_trusted_payloads(
+        STEP, LABEL, _cand(mesh={"num_nodes": 26000, "num_elements": 12000})
+    ).overall_score
+    assert full == over
+
+
+def test_mesh_budget_does_not_impose_hidden_reference_floor():
+    """Resolution is assessed by result validity/accuracy, not a budget floor."""
+    rep = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_nodes": 999, "num_elements": 12000}))
+    assert rep.subscores["mesh_budget"] == 100.0
+    assert rep.subscores_details["mesh_budget"]["findings"] == []
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["mesh_within_budget"] is True
+    ok = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_nodes": 1000, "num_elements": 12000}))
+    assert ok.subscores["mesh_budget"] == 100.0
+
+
+@pytest.mark.parametrize(
+    "candidate_elements,reference_elements",
+    [
+        (1, 12000),
+        (24000, 12000),
+        (12000, 1),
+        (12000, 24000),
+    ],
+)
+def test_mesh_budget_ignores_candidate_and_reference_element_counts(
+    candidate_elements, reference_elements
+):
+    label = {**LABEL, "mesh": {"num_nodes": 20000, "num_elements": reference_elements}}
+    candidate = _cand(mesh={"num_nodes": 23000, "num_elements": candidate_elements})
+    rep = score_trusted_payloads(STEP, label, candidate)
+    assert rep.subscores["mesh_budget"] == 100.0
+
+
+def test_mesh_budget_custom_ratio_uses_nodes():
+    rep = score_trusted_payloads(
+        STEP,
+        LABEL,
+        _cand(mesh={"num_nodes": 30000, "num_elements": 12000}),
+        mesh_budget_zero_ratio=1.5,
+    )
+    assert rep.subscores["mesh_budget"] == 100.0
     assert rep.pass_fail_flags["mesh_within_budget"] is True
 
 
-def test_mesh_budget_zero_at_130_percent():
-    rep = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_elements": 15600}))  # 130%
-    assert rep.subscores["mesh_budget"] == 0.0
-    assert any(f["code"] == "MESH_BUDGET_EXCEEDED" for f in rep.failure_modes_detected)
-    assert rep.pass_fail_flags["mesh_within_budget"] is False
+def test_mesh_budget_missing_reference_nodes_is_evaluation_error():
+    label = deepcopy(LABEL)
+    label["mesh"].pop("num_nodes")
+    with pytest.raises(ValueError, match="reference source-node baseline"):
+        score_trusted_payloads(STEP, label, _cand())
 
 
-def test_mesh_budget_costs_25_points_when_zero():
-    """An otherwise-perfect candidate that blows the mesh budget loses ~25 pts."""
-    full = score_trusted_payloads(STEP, LABEL, _cand()).overall_score
-    over = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_elements": 16000})).overall_score
-    assert full - over >= 20
+@pytest.mark.parametrize("nodes", [None, 0, -1, True, 20000.0, "20000"])
+def test_mesh_budget_invalid_candidate_nodes_cannot_bypass_gate(nodes):
+    candidate = _cand(mesh={"num_nodes": nodes, "num_elements": 12000})
+    rep = score_trusted_payloads(STEP, LABEL, candidate)
+    assert rep.subscores_details["mesh_budget"]["weight"] == 0.25
+    assert rep.overall_score == 0
+    assert {gate["reason"] for gate in rep.gates_triggered} == {"MESH_BUDGET_INVALID"}
 
 
-def test_mesh_budget_underresolved_floor_not_spoofable():
-    """A trivially coarse mesh cannot spoof full mesh-budget credit.
+@pytest.mark.parametrize("nodes", [55000, 55001, 56000])
+def test_decimal_ratio_preserves_exact_budget_boundary(nodes):
+    reference = {**LABEL, "mesh": {"num_nodes": 50000, "num_elements": 12000}}
+    candidate = _cand(mesh={"num_nodes": nodes, "num_elements": 12000})
+    report = score_trusted_payloads(STEP, reference, candidate, mesh_budget_zero_ratio=1.1)
+    assert report.overall_score == (100.0 if nodes == 55000 else 0.0)
+    assert any("cap=55000 nodes" in item for item in report.evidence)
+    assert bool(report.gates_triggered) is (nodes > 55000)
 
-    Regression for the mesh-budget spoof: an agent could solve on a fine mesh, then
-    attach a 1-element mesh to the result so the budget reads 'fewer elements ->
-    full credit'. A mesh below the floor (5% of baseline = 600) now scores 0, so the
-    25% efficiency share cannot be farmed with a degenerate mesh."""
-    rep = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_elements": 1}))
-    assert rep.subscores["mesh_budget"] == 0.0
-    assert any(f["code"] == "MESH_BUDGET_UNDERRESOLVED" for f in rep.failure_modes_detected)
-    assert rep.pass_fail_flags["mesh_within_budget"] is False
-    # and a legitimately efficient mesh just above the floor still earns full credit
-    ok = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_elements": 6000}))
-    assert ok.subscores["mesh_budget"] == 100.0
+
+def test_explicit_task_node_cap_overrides_derived_ceiling():
+    candidate = _cand()
+    candidate["mesh"]["num_nodes"] = 26100
+    rep = score_trusted_payloads(STEP, LABEL, candidate, max_node_count=26100)
+    assert rep.subscores["mesh_budget"] == 100.0
+    assert any("cap=26100 nodes" in item for item in rep.evidence)
+    candidate["mesh"]["num_nodes"] = 26101
+    assert score_trusted_payloads(STEP, LABEL, candidate, max_node_count=26100).overall_score == 0
+
+
+@pytest.mark.parametrize("retain_artifacts", [False, True])
+@pytest.mark.parametrize("nodes", [26100, 26101])
+def test_fcstd_path_honors_explicit_node_cap(retain_artifacts, nodes):
+    candidate = _cand(mesh={"num_nodes": nodes, "num_elements": 12000})
+    with (
+        TemporaryDirectory() as directory,
+        patch(
+            "freecad_validator.fem.step_interface._extract",
+            side_effect=[STEP, LABEL, candidate],
+        ),
+    ):
+        report = score_step_fcstd(
+            "source.step",
+            "reference.FCStd",
+            "candidate.FCStd",
+            extract_dir=directory if retain_artifacts else None,
+            max_node_count=26100,
+        )
+    assert report.subscores["mesh_budget"] == (100.0 if nodes == 26100 else 0.0)
+    assert any("cap=26100 nodes" in item for item in report.evidence)
+    if nodes > 26100:
+        assert report.overall_score == 0.0
+
+
+@pytest.mark.parametrize("cap", [0, -1, True, 26000.0, 19999])
+def test_invalid_task_node_cap_is_evaluation_error(cap):
+    with pytest.raises(ValueError):
+        score_trusted_payloads(STEP, LABEL, _cand(), max_node_count=cap)
 
 
 if __name__ == "__main__":

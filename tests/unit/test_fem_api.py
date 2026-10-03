@@ -32,6 +32,9 @@ def test_validator_rejects_invalid_configuration() -> None:
         FEMValidator(mesh_budget_zero_ratio=1.0)
     with pytest.raises(ValueError, match="timeout_seconds"):
         FEMValidator(timeout_seconds=0.0)
+    for invalid_cap in (0, -1, True, 26000.0):
+        with pytest.raises(ValueError, match="max_node_count"):
+            FEMValidator(max_node_count=invalid_cap)
 
 
 def test_validator_forwards_configuration() -> None:
@@ -40,6 +43,7 @@ def test_validator_forwards_configuration() -> None:
         extract_dir="/tmp/extract",
         require_boolean=True,
         timeout_seconds=45.0,
+        max_node_count=26100,
     )
     with patch("freecad_validator.fem.validator.score_step_fcstd", return_value=_report()) as score:
         report = validator.validate(
@@ -52,10 +56,24 @@ def test_validator_forwards_configuration() -> None:
     assert score.call_args.kwargs["require_boolean"] is True
     assert score.call_args.kwargs["freecad_cmd"] == "/fake/freecadcmd"
     assert score.call_args.kwargs["timeout_seconds"] == 45.0
+    assert score.call_args.kwargs["max_node_count"] == 26100
+
+
+def test_validator_forwards_node_cap_to_trusted_payloads() -> None:
+    with patch(
+        "freecad_validator.fem.validator.score_trusted_payloads", return_value=_report()
+    ) as score:
+        FEMValidator(max_node_count=26100).validate_trusted_payloads(
+            target_geometry={},
+            reference_submission={},
+            candidate_submission={},
+        )
+    assert score.call_args.kwargs["max_node_count"] == 26100
 
 
 def test_fem_score_cli_emits_json(capsys) -> None:
-    with patch("freecad_validator.cli.main.FEMValidator.validate", return_value=_report()):
+    with patch("freecad_validator.cli.main.FEMValidator", autospec=True) as validator:
+        validator.return_value.validate.return_value = _report()
         code = main(
             [
                 "fem-score",
@@ -66,10 +84,13 @@ def test_fem_score_cli_emits_json(capsys) -> None:
                 "--require-boolean",
                 "--timeout",
                 "45",
+                "--max-node-count",
+                "26100",
             ]
         )
 
     assert code == 0
+    assert validator.call_args.kwargs["max_node_count"] == 26100
     payload = json.loads(capsys.readouterr().out)
     assert payload["overall_score"] == 91.0
     assert payload["grade"] == "excellent"

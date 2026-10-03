@@ -1,6 +1,9 @@
 """Behavioral tests for :mod:`freecad_validator.fem.scorer`."""
 
+import pytest
+
 from freecad_validator.fem import CaseDefinition, FailureMode, Submission, score_result
+from freecad_validator.fem.validators import validate_problem_setup
 
 
 def _case():
@@ -86,6 +89,58 @@ def test_excellent_scores_high():
     assert rep.pass_fail_flags["reproducible"]
     assert rep.pass_fail_flags["not_hallucinated"]
     assert not rep.failure_modes_detected
+
+
+@pytest.mark.parametrize(
+    "analysis_type",
+    [
+        "modal",
+        "frequency",
+        "eigen",
+        "vibration",
+        "unknown",
+        "unsupported_linear",
+        "unsupported_dynamic",
+        "modal_linear",
+        "unsupported_buckling",
+        "unsupported_thermal",
+        "nonlinear_made_up_material",
+    ],
+)
+@pytest.mark.parametrize("matching_reference", [False, True])
+def test_unsupported_analysis_cannot_receive_a_score(analysis_type, matching_reference):
+    case = _case()
+    submission = _excellent()
+    submission.analysis_type = analysis_type
+    if matching_reference:
+        case.analysis_type = analysis_type
+    report = score_result(case, submission)
+    assert report.overall_score == 0
+    assert {gate["reason"] for gate in report.gates_triggered} == {FailureMode.WRONG_ANALYSIS_TYPE}
+
+
+@pytest.mark.parametrize(
+    "canonical,alias",
+    [
+        ("static", " Linear Static "),
+        ("static", "static-structural"),
+        ("static", "linear"),
+        ("static", "stress"),
+        ("thermal_mechanical", "thermomech"),
+        ("thermal", "heat transfer"),
+        ("transient", "dynamic"),
+        ("transient", "explicit"),
+        ("nonlinear_material", "nonlinear material"),
+        ("large_deformation", "geometrical nonlinearity"),
+    ],
+)
+def test_explicit_analysis_aliases_remain_supported(canonical, alias):
+    case, submission = _case(), _excellent()
+    case.analysis_type = canonical
+    submission.analysis_type = alias
+    score, findings = validate_problem_setup(case, submission)
+    assert score == 100
+    assert not any(f.code == FailureMode.WRONG_ANALYSIS_TYPE for f in findings)
 
 
 def test_physically_impossible_gates_to_zero():

@@ -80,6 +80,14 @@ material_spec.loader.exec_module(material_counts)
 grouped_material_counts = material_counts.grouped_material_counts
 material_signature = material_counts.material_signature
 
+geometry_path = Path(__file__).resolve().parents[1] / "geometry.py"
+geometry_spec = importlib.util.spec_from_file_location("_freecad_validator_geometry", geometry_path)
+if geometry_spec is None or geometry_spec.loader is None:
+    raise ImportError(f"cannot load geometry module from {geometry_path}")
+geometry = importlib.util.module_from_spec(geometry_spec)
+geometry_spec.loader.exec_module(geometry)
+geometry_facts = geometry.geometry_facts
+
 
 def runtime_info(require_calculix=False):
     """Return runtime versions and optionally verify the configured solver."""
@@ -164,9 +172,6 @@ def extract_result_values(res):
         results["max_shear_MPa"] = max(shear)
     if temp:
         results["max_temperature_C"] = max(temp)
-    freqs = list(getattr(res, "EigenmodeFrequencies", []) or [])
-    if freqs:
-        results["natural_frequencies_Hz"] = freqs
     return results
 
 
@@ -377,7 +382,6 @@ def extract_material(doc):
 # CalculiX/ccxtools AnalysisType string -> scorer vocabulary
 _ANALYSIS = {
     "static": "static",
-    "frequency": "modal",
     "thermomech": "thermal_mechanical",
     "buckling": "buckling",
     "check": "static",
@@ -388,7 +392,9 @@ def extract_solver(doc):
     for o in doc.Objects:
         if "Solver" in o.TypeId or "Ccx" in o.TypeId:
             at = getattr(o, "AnalysisType", "static")
-            return _ANALYSIS.get(str(at), "static"), getattr(o, "GeometricalNonlinearity", "linear")
+            if str(at) not in _ANALYSIS:
+                raise ValueError(f"Unsupported CalculiX analysis type: {at!r}")
+            return _ANALYSIS[str(at)], getattr(o, "GeometricalNonlinearity", "linear")
     return "static", "linear"
 
 
@@ -534,47 +540,7 @@ def analysed_solids(doc):
 
 
 def extract_geometry(doc):
-    shapes = analysed_solids(doc)
-    if not shapes:
-        return {}
-    solids = [solid for shape in shapes for solid in shape.Solids]
-    volume = sum(s.Volume for s in shapes)
-    surface_area = sum(s.Area for s in shapes)
-    regions = sorted(
-        (
-            {
-                "volume_mm3": solid.Volume,
-                "surface_area_mm2": solid.Area,
-                "num_faces": len(solid.Faces),
-                "num_edges": len(solid.Edges),
-                "num_shells": len(solid.Shells),
-            }
-            for solid in solids
-        ),
-        key=lambda region: (
-            region["volume_mm3"],
-            region["surface_area_mm2"],
-            region["num_faces"],
-            region["num_edges"],
-        ),
-    )
-    bbs = [s.BoundBox for s in shapes]
-    xs = [b.XMin for b in bbs] + [b.XMax for b in bbs]
-    ys = [b.YMin for b in bbs] + [b.YMax for b in bbs]
-    zs = [b.ZMin for b in bbs] + [b.ZMax for b in bbs]
-    dx, dy, dz = max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)
-    return {
-        "characteristic_length_mm": (dx * dx + dy * dy + dz * dz) ** 0.5,
-        "bbox_mm": [dx, dy, dz],
-        "volume_mm3": volume,
-        "surface_area_mm2": surface_area,
-        "num_solids": len(solids),
-        "num_compsolids": sum(len(shape.CompSolids) for shape in shapes),
-        "shape_types": sorted({str(shape.ShapeType) for shape in shapes}),
-        "num_faces": sum(region["num_faces"] for region in regions),
-        "num_edges": sum(region["num_edges"] for region in regions),
-        "regions": regions,
-    }
+    return geometry_facts(analysed_solids(doc))
 
 
 def assert_safe_fcstd(path):
@@ -696,7 +662,7 @@ def main():
                 solved_fm = cand_fm
                 break
         else:
-            solved_fm = cand_fm  # no displacement field to match against (e.g. modal)
+            solved_fm = cand_fm  # no displacement field to match against
             break
     mesh = {}
     if solved_fm is not None:
