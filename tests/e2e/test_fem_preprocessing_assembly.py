@@ -238,6 +238,21 @@ def test_selected_boolean_inputs_are_used_without_reading_result(tmp_path):
     assert [body.shape.Volume for body in parts] == pytest.approx([1000, 1000])
 
 
+def test_saved_inputs_are_found_through_a_wrapper_link(assembly_case):
+    _, path, solid, _, unchanged = assembly_case
+    doc = FreeCAD.openDocument(str(path))
+    wrapper = doc.addObject("Part::Feature", "Wrapper")
+    wrapper.addProperty("App::PropertyLink", "Source")
+    wrapper.Source = doc.getObject("RenamedBoolean")
+    # The wrapper has no result shape: only the saved object links are relevant.
+    doc.getObject("Mesh").Shape = wrapper
+    doc.save()
+    FreeCAD.closeDocument(doc.Name)
+    parts, fragmented = read_clean_bodies(path)
+    assert not fragmented
+    assert [body.shape.Volume for body in parts] == pytest.approx([solid.Volume, unchanged.Volume])
+
+
 def test_fused_hole_fill_is_attributed_to_original_body(tmp_path):
     first = Part.makeBox(10, 10, 10)
     second = Part.makeBox(10, 10, 10, FreeCAD.Vector(10, 0, 0))

@@ -95,6 +95,34 @@ def boolean_input_objects(feature):
     return None
 
 
+def linked_boolean_inputs(feature, role):
+    """Follow saved links through wrappers, stopping at the nearest input set."""
+    pending = [feature]
+    visited = set()
+    while pending:
+        found = {}
+        following = []
+        for obj in pending:
+            if obj.Name in visited:
+                continue
+            visited.add(obj.Name)
+            inputs = boolean_input_objects(obj)
+            if inputs is not None:
+                key = tuple(sorted(item.Name for item in inputs if item is not None))
+                found[key] = inputs
+            else:
+                following.extend(obj.OutList)
+        if len(found) > 1:
+            raise BodyCorrespondenceError(
+                "Multiple pre-Boolean input sets are linked to the analysis feature",
+                role,
+            )
+        if found:
+            return next(iter(found.values()))
+        pending = following
+    return None
+
+
 def read_clean_bodies(path, *, candidate=False):
     """Read explicitly saved pre-Boolean inputs of the selected FEM geometry.
 
@@ -131,7 +159,7 @@ def read_clean_bodies(path, *, candidate=False):
             "Part::Torus",
         } or link.isDerivedFrom("PartDesign::Body"):
             return solid_bodies(world_shape(link), f"{path}:{link.Name}", error_type), False
-        inputs = boolean_input_objects(link)
+        inputs = linked_boolean_inputs(link, role)
         if not inputs:
             raise BodyCorrespondenceError(
                 "Pre-Boolean input objects are not saved on the selected analysis feature; "
