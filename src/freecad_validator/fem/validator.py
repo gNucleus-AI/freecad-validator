@@ -87,11 +87,14 @@ class FEMValidator:
         reference_submission: dict[str, Any],
         candidate_submission: dict[str, Any],
         geometry_source: str = "STEP",
+        preprocessing_score: float | None = None,
     ) -> ScoringReport:
         """Score trusted, validator-generated payloads without FreeCAD.
 
         Never pass candidate-controlled JSON to this low-level API because it
         trusts replay-verification fields produced by the FCStd adapter.
+        For preprocessing, pass geometry credit from a trusted evaluation as
+        ``preprocessing_score``; extracted FEM payloads cannot reconstruct geometry.
         """
         return score_trusted_payloads(
             target_geometry,
@@ -103,4 +106,5 @@ class FEMValidator:
             mesh_budget_zero_ratio=self.mesh_budget_zero_ratio,
             geometry_source=geometry_source,
             max_node_count=self.max_node_count,
+            preprocessing_score=preprocessing_score,
         )

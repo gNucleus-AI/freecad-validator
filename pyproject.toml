@@ -30,6 +30,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+preprocess = [
+    "manifold3d == 3.5.4",
+]
 # Keep OCP unconditional: each Python version must install its native backend.
 # V1 and import-only use retain the base Python range.
 v2 = [

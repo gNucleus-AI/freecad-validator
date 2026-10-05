@@ -3,6 +3,7 @@
 import os
 import sys
 
+import FreeCAD
 import Part
 from femexamples.ccx_cantilever_faceload import setup
 from femtools.ccxtools import FemToolsCcx
@@ -14,7 +15,17 @@ def main():
     working_dir = os.path.dirname(os.path.abspath(fcstd_path))
 
     doc = setup(test_mode=True)
-    Part.export([doc.Box], step_path)
+    if "raw-hole" in sys.argv:
+        box = doc.Box.Shape
+        bounds = box.BoundBox
+        hole = Part.makeCylinder(
+            0.2 * min(bounds.XLength, bounds.YLength),
+            bounds.ZLength,
+            FreeCAD.Vector(bounds.Center.x, bounds.Center.y, bounds.ZMin),
+        )
+        box.cut(hole).exportStep(step_path)
+    else:
+        Part.export([doc.Box], step_path)
     solver = doc.CalculiXCcxTools
     solver.WorkingDir = working_dir
     fem = FemToolsCcx(doc.Analysis, solver)

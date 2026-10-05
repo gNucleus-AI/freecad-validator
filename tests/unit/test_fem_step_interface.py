@@ -1,5 +1,6 @@
 """Tests for the STEP + reference + candidate FEM validator."""
 
+import json
 import os
 import subprocess
 import sys
@@ -618,7 +619,13 @@ def test_required_preprocessing_changed_geometry_continues_normal_scoring():
     with TemporaryDirectory() as extract_dir:
         with patch(
             "freecad_validator.fem.step_interface._extract",
-            side_effect=[input_geometry, candidate_geometry, preprocessing_label, candidate],
+            side_effect=[
+                input_geometry,
+                candidate_geometry,
+                preprocessing_label,
+                candidate,
+                {"score": 0.5, "reference_changed_body_count": 2, "extra_changed_body_count": 0},
+            ],
         ) as extract:
             rep = score_step_fcstd(
                 "source.step",
@@ -634,10 +641,11 @@ def test_required_preprocessing_changed_geometry_continues_normal_scoring():
         failure["code"] == FailureMode.GEOMETRY_MISMATCH for failure in rep.failure_modes_detected
     )
     assert any("reference FCStd geometry target" in item for item in rep.evidence)
-    assert len(extract.call_args_list) == 4
+    assert len(extract.call_args_list) == 5
     assert extract.call_args_list[0].kwargs.get("extra_args") is None
     assert extract.call_args_list[1].kwargs["extra_args"] == ["geometry-only"]
-    assert extract.call_args_list[-1].kwargs["extra_args"] == ["verify-solve"]
+    assert extract.call_args_list[-2].kwargs["extra_args"] == ["verify-solve"]
+    assert rep.subscores_details["preprocessing"]["multiplier"] == 0.5
 
 
 def test_corrupt_candidate_is_scored_zero_after_trusted_inputs_extract():
@@ -739,6 +747,31 @@ def test_extract_does_not_reuse_stale_json():
                 _extract(str(freecad_cmd), "adapter.py", "candidate.FCStd", str(out_path))
 
         assert not out_path.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Uses a POSIX executable fixture")
+@pytest.mark.parametrize(
+    "payload,reason",
+    [
+        (
+            {
+                "status": "evaluation_error",
+                "error": "candidate body correspondence: ambiguous ownership",
+            },
+            "candidate body correspondence: ambiguous ownership",
+        ),
+        ({"status": "ok", "score": 1.0}, "adapter did not complete successfully"),
+    ],
+)
+def test_worker_reads_failure_reason_but_never_accepts_nonzero_exit(tmp_path, payload, reason):
+    command = tmp_path / "freecadcmd"
+    command.write_text(
+        f"#!{sys.executable}\nimport sys\nfrom pathlib import Path\n"
+        f"Path(sys.argv[-1]).write_text({json.dumps(payload)!r})\nraise SystemExit(1)\n"
+    )
+    command.chmod(0o755)
+    with pytest.raises(ExtractionError, match=reason):
+        _extract(str(command), "adapter.py", "input.FCStd", str(tmp_path / "report.json"))
 
 
 def test_adapter_timeout_terminates_process_tree(tmp_path):
@@ -1177,7 +1210,13 @@ def test_required_preprocessing_face_partition_continues_to_solver_verification(
     with TemporaryDirectory() as extract_dir:
         with patch(
             "freecad_validator.fem.step_interface._extract",
-            side_effect=[source, {"geometry": prepared}, label, candidate],
+            side_effect=[
+                source,
+                {"geometry": prepared},
+                label,
+                candidate,
+                {"score": None, "reference_changed_body_count": 0, "extra_changed_body_count": 0},
+            ],
         ) as extract:
             report = score_step_fcstd(
                 "source.step",
@@ -1190,6 +1229,6 @@ def test_required_preprocessing_face_partition_continues_to_solver_verification(
 
     assert report.overall_score > 0
     assert report.gates_triggered == []
-    assert len(extract.call_args_list) == 4
-    assert extract.call_args_list[-1].kwargs["extra_args"] == ["verify-solve"]
+    assert len(extract.call_args_list) == 5
+    assert extract.call_args_list[-2].kwargs["extra_args"] == ["verify-solve"]
     assert any("reference FCStd geometry target" in item for item in report.evidence)

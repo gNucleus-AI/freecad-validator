@@ -475,7 +475,7 @@ def _add_fem_score_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--require-preprocessing",
         action="store_true",
-        help="require candidate geometry to differ from the raw STEP",
+        help="require preprocessing and multiply the FEM score by original-body geometry credit",
     )
     p.add_argument(
         "--require-boolean",

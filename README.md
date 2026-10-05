@@ -287,6 +287,16 @@ explicit task requirement. Neither requirement is inferred from instruction
 text. Intermediate extraction JSON is temporary by default; pass
 `--extract-dir` to retain it.
 
+For preprocessing tasks, install `gnucleus-freecad-validator[preprocess]` in the
+Python environment used by FreeCAD. The flag also enables automatic comparison
+of each original body before Boolean Fragments: the final score is the existing
+FEM score multiplied by preprocessing geometry credit. A required edit earns one
+point when geometric similarity exceeds 0.95; extra edits subtract points, and
+bodies unchanged by both the reference and candidate are skipped. Topology-only
+differences receive no geometry penalty. No manual body mapping is required.
+See [preprocessing scoring](src/freecad_validator/fem/pre_process/README.md) for
+the formula and correspondence limits.
+
 The preprocessing gate treats geometry as unchanged only when volume, surface
 area, and topology all match. Face or region partitions can therefore satisfy
 preprocessing even when volume and area are preserved. Region comparisons use
