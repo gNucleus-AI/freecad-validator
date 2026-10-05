@@ -147,6 +147,12 @@ is performed because position and orientation can be part of the requested edit.
   elsewhere in the document or regroup the actual meshed fragments when history
   is unavailable. Ambiguous ownership remains an evaluation error. These checks
   do not replace FEM/Boolean checks.
+- Saved-input consistency uses the existing Halton sampler and point-in-solid
+  queries in both directions, with logical OR for overlapping solids. It does
+  not cut, fuse, or rebuild verification geometry. Sampling is per solid (8,192
+  probes, extended up to 65,536 if fewer than 64 land inside); an uncovered probe
+  rejects the history, and insufficient occupied probes remain an evaluation
+  error. This finite sampling check is not an exact geometric equivalence proof.
 - Failed optional splitter removal or tessellation does not discard otherwise
   valid geometry: original-body matching falls back to CAD intersections.
 - The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit.

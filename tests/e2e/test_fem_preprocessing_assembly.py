@@ -761,9 +761,41 @@ def test_decoy_inputs_produce_zero_worker_reward(assembly_case, tmp_path, monkey
     assert report["overall_score"] == 0
 
 
+@pytest.mark.parametrize("missing_material", [False, True])
+def test_saved_input_occupancy_check_does_not_build_geometry(monkeypatch, missing_material):
+    analyzed = Part.makeBox(10, 10, 10)
+    prepared = Part.makeBox(5 if missing_material else 10, 10, 10)
+    bodies = [BodyGeometry(prepared, "prepared")]
+    monkeypatch.setattr(
+        assembly_module.Part,
+        "makeCompound",
+        Mock(side_effect=AssertionError("Must not build verification geometry")),
+    )
+    if missing_material:
+        with pytest.raises(EvaluationError, match="do not match"):
+            assembly_module.verify_clean_inputs(bodies, analyzed, "reference")
+    else:
+        assembly_module.verify_clean_inputs(bodies, analyzed, "reference")
+
+
+@pytest.mark.parametrize("extra_width", [0.0, 0.25])
+def test_sampled_input_union_preserves_extra_material_detection(extra_width):
+    first = Part.makeBox(3, 2, 2)
+    second = Part.makeBox(3, 2, 2, FreeCAD.Vector(2, 0, 0))
+    actual = Part.makeBox(5 + extra_width, 2, 2)
+    bodies = [BodyGeometry(first, "first"), BodyGeometry(second, "overlapping")]
+    analyzed = [BodyGeometry(actual, "analysis")]
+    assert assembly_module.history_matches_analysis(bodies, analyzed) == (extra_width == 0)
+    # Overlap must use OR occupancy; a missing input still leaves exposed material.
+    assert not assembly_module.history_matches_analysis(bodies[:1], analyzed)
+
+
 def test_input_verification_failure_does_not_become_candidate_zero(monkeypatch):
-    body = BodyGeometry(Mock(), "prepared")
-    body.mesh = None
-    body.shape.cut.side_effect = Part.OCCError("injected verification failure")
+    body = BodyGeometry(Part.makeBox(1, 1, 1), "prepared")
+    monkeypatch.setattr(
+        assembly_module,
+        "_inside",
+        Mock(side_effect=Part.OCCError("injected verification failure")),
+    )
     with pytest.raises(BodyCorrespondenceError, match="injected verification failure"):
         assembly_module.verify_clean_inputs([body], Part.makeBox(1, 1, 1), "candidate")
