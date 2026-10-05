@@ -82,6 +82,10 @@ unwrap `Compound`/`CompSolid` results and does not apply to multi-body originals
 
 Before scoring saved inputs, the scorer checks that their occupied material
 matches the actual mesh-linked geometry using CAD differences in both directions.
+If CAD differences fail or report a mismatch, an independent mesh Boolean check
+can establish agreement. Its volume tolerances apply to each solid separately,
+so a large assembly does not mask a missing small body. Saved Boolean tolerances
+do not control this check.
 The analysis shape is used only for this consistency check; its Boolean regions
 are never partitioned or reconstructed into scored bodies. A candidate with
 mismatched clean inputs receives zero credit; mismatched reference inputs or a

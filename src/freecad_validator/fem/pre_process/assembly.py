@@ -137,6 +137,30 @@ def same_solid_geometry(left, right):
     return left.cut(right).Volume + right.cut(left).Volume <= tolerance
 
 
+def mesh_inputs_match_analysis(bodies, analyzed):
+    """Independently check material when OCC differences are inconclusive.
+
+    Some valid coincident surfaces produce inconsistent CAD Boolean results.
+    Check each input and analysis solid separately so a large assembly cannot
+    hide a missing small body in an assembly-wide relative tolerance.
+    """
+    analysis_bodies = [BodyGeometry(solid.copy(), "analysis") for solid in analyzed.Solids]
+    if any(body.mesh is None for body in [*bodies, *analysis_bodies]):
+        return False
+    prepared = bodies[0].mesh
+    for body in bodies[1:]:
+        prepared = prepared + body.mesh
+    actual = analysis_bodies[0].mesh
+    for body in analysis_bodies[1:]:
+        actual = actual + body.mesh
+    return all(
+        (body.mesh - actual).volume() <= max(1e-5, body.shape.Volume * 1e-8) for body in bodies
+    ) and all(
+        (body.mesh - prepared).volume() <= max(1e-5, body.shape.Volume * 1e-8)
+        for body in analysis_bodies
+    )
+
+
 def verify_clean_inputs(bodies, analyzed, role):
     """Check occupied material only; analyzed regions never become scored bodies."""
     try:
@@ -147,11 +171,13 @@ def verify_clean_inputs(bodies, analyzed, role):
             prepared = Part.makeCompound([body.shape for body in bodies])
             mismatch = analyzed.cut(prepared).Volume > max(1e-5, analyzed.Volume * 1e-8)
     except Part.OCCError as exc:
+        if mesh_inputs_match_analysis(bodies, analyzed):
+            return
         raise BodyCorrespondenceError(
             f"Cannot verify saved clean inputs against analysis geometry: {exc}",
             role,
         ) from exc
-    if mismatch:
+    if mismatch and not mesh_inputs_match_analysis(bodies, analyzed):
         error_type = CandidateGeometryError if role == "candidate" else EvaluationError
         raise error_type("Saved clean inputs do not match the actual analysis geometry")
 
