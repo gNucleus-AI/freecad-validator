@@ -79,6 +79,12 @@ against original/reference bodies; added material needs unambiguous ownership.
 Fragments are not independently counted as extra original bodies. A fallback
 runs the same geometry comparison; it never grants an assumed score of 1.
 
+A saved input can itself be a fused solid. If it spans multiple independent
+original/reference bodies, partition it before one-to-one assignment. Otherwise
+the remaining originals would be incorrectly counted as deleted. Contained
+fittings alone do not establish fusion, and the recovered bodies still undergo
+the normal geometry comparison, including penalties for missing or extra edits.
+
 Explicitly linked inputs that contradict the actual analysis still cause a
 candidate zero or reference evaluation error. Unusable optional detached history
 is ignored in favor of the actual analysis geometry. Unresolvable ownership,

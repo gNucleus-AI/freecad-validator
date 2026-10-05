@@ -537,6 +537,31 @@ def regroup_bodies(raw, parts, fragmented, reference=None):
         raise BodyCorrespondenceError(str(exc), role) from exc
 
 
+def fused_input_owners(anchors, overlaps):
+    """Recognize a saved solid spanning multiple independent original bodies.
+
+    Saved input links establish provenance, not a one-input/one-original mapping.
+    Contained fittings do not establish fusion: each owner must retain substantial
+    material outside each other covered anchor.
+    """
+    owners = [
+        i
+        for i, anchor in enumerate(anchors)
+        if anchor is not None and overlaps[i] > 0.8 * anchor.shape.Volume
+    ]
+    if len(owners) < 2:
+        return []
+    covered = [anchors[i] for i in owners]
+    shared = overlap_matrix(covered, covered)
+    np.fill_diagonal(shared, 0.0)
+    independent = [
+        i
+        for column, i in enumerate(owners)
+        if np.max(shared[:, column]) < 0.8 * anchors[i].shape.Volume
+    ]
+    return independent if len(independent) > 1 else []
+
+
 def _regroup_bodies(raw, parts, fragmented, reference=None):
     """Return one shape per original body, extra solids, and the ownership map.
 
@@ -545,8 +570,11 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
     Reference geometry also anchors candidate correspondence after requested moves.
     """
     overlaps = overlap_matrix(raw, parts)
+    anchors = raw if reference is None else reference
+    anchor_overlaps = overlaps
     if reference is not None:
-        overlaps = np.maximum(overlaps, overlap_matrix(reference, parts))
+        anchor_overlaps = overlap_matrix(reference, parts)
+        overlaps = np.maximum(overlaps, anchor_overlaps)
     volumes = np.array([body.shape.Volume for body in parts])
     raw_volumes = np.array([body.shape.Volume for body in raw])
     if reference is not None:
@@ -602,9 +630,23 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
                 contributions[i].append(part.shape)
             assigned.add(j)
     elif parts:
+        # A saved "input" may itself be a baked fusion. Recover its owners before
+        # one-to-one matching, which would otherwise mark the other parts deleted.
+        for j, part in enumerate(parts):
+            owners = fused_input_owners(anchors, anchor_overlaps[:, j])
+            if not owners:
+                continue
+            pieces = partition_fused_part(part, owners, anchors)
+            for i, shape in pieces.items():
+                ownership[i].append(j)
+                contributions[i].append(shape)
+            assigned.add(j)
         quality = overlaps / np.maximum(np.minimum(raw_volumes[:, None], volumes[None, :]), 1e-12)
-        rows, columns = linear_sum_assignment(-quality)
-        for i, j in zip(rows, columns, strict=False):
+        available_rows = [i for i, indices in enumerate(ownership) if not indices]
+        available_columns = [j for j in range(len(parts)) if j not in assigned]
+        rows, columns = linear_sum_assignment(-quality[np.ix_(available_rows, available_columns)])
+        for row, column in zip(rows, columns, strict=False):
+            i, j = available_rows[row], available_columns[column]
             if quality[i, j] >= 0.1:
                 ownership[i].append(int(j))
                 contributions[i].append(parts[j].shape)

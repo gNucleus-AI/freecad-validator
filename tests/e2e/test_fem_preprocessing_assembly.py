@@ -414,6 +414,45 @@ def save_detached_inputs(path, clean, raw=()):
         FreeCAD.closeDocument(doc.Name)
 
 
+@pytest.mark.parametrize("storage", ["detached", "linked"])
+@pytest.mark.parametrize("edit", ["correct", "unprocessed", "extra_cut"])
+def test_saved_fused_input_is_scored_by_original_body(tmp_path, storage, edit):
+    first = Part.makeBox(10, 10, 10)
+    second = Part.makeBox(1, 10, 10, FreeCAD.Vector(10, 0, 0))
+    unchanged = Part.makeBox(3, 3, 3, FreeCAD.Vector(30, 0, 0))
+    raw_first = first.cut(Part.makeCylinder(1, 10, FreeCAD.Vector(3, 3, 0)))
+    raw = tmp_path / "raw.step"
+    Part.makeCompound([raw_first, second, unchanged]).exportStep(str(raw))
+    ref = tmp_path / "reference.FCStd"
+    save_analysis(ref, [first.fuse(second), unchanged], history=[first, second, unchanged])
+    fused = (raw_first if edit == "unprocessed" else first).fuse(second).removeSplitter()
+    if edit == "extra_cut":
+        fused = fused.cut(Part.makeCylinder(0.3, 10, FreeCAD.Vector(10.5, 3, 0)))
+    candidate = tmp_path / "candidate.FCStd"
+    if storage == "detached":
+        save_detached_inputs(candidate, [fused, unchanged])
+    else:
+        save_analysis(candidate, [fused, unchanged])
+    result = score_assembly(
+        raw, ref, candidate, PreProcessScorer(DiffConfig(region_sample_count=256))
+    )
+    assert result["score"] == (1 if edit == "correct" else 0)
+    assert result["reference_changed_body_count"] == 1
+    assert result["extra_changed_body_count"] == (1 if edit == "extra_cut" else 0)
+    assert all(result["correspondence"]["candidate"])
+
+
+def test_contained_fitting_does_not_turn_a_saved_body_into_a_fusion():
+    housing = BodyGeometry(Part.makeBox(10, 10, 10), "housing")
+    fitting = BodyGeometry(Part.makeBox(1, 1, 1, FreeCAD.Vector(2, 2, 2)), "fitting")
+    rebuilt, extras, mapping = regroup_bodies(
+        [housing, fitting], [housing], False, [housing, fitting]
+    )
+    assert not extras
+    assert mapping == [[0], []]
+    assert rebuilt[1] is None
+
+
 @pytest.mark.parametrize("with_raw_history", [False, True])
 def test_legacy_detached_clean_inputs_score_without_rewriting_file(
     assembly_case, tmp_path, with_raw_history
