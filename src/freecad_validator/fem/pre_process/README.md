@@ -63,34 +63,27 @@ The `freecad-validator fem-score --require-preprocessing` option activates this 
 remain in force; a candidate already gated to zero does not need another geometry
 evaluation.
 
-Automatic correspondence counts raw STEP solids as original bodies and matches
-saved **pre-Boolean clean inputs** one-to-one in world coordinates. The selected
-analysis feature can retain input links: `PreprocessingInputs`, Boolean
-Fragments `Objects`, or supported native Boolean input properties such as
-MultiFuse `Shapes`. These links identify clean bodies; object labels and
-visibility do not select geometry. When links are absent, legacy documents can
-instead supply independent saved clean parts outside the analysis dependency
-graph. Intermediate construction objects are excluded. A complete raw import
-group is omitted only when its bodies geometrically match the supplied raw STEP
-and separate prepared objects exist. Ambiguous overlapping saved versions remain
-an evaluation error; the reference score is never used to choose a version.
+Automatic correspondence counts raw STEP solids as original bodies and prefers
+verified **pre-Boolean clean inputs** in world coordinates. Input links on the
+analysis feature take precedence: `PreprocessingInputs`, Boolean Fragments
+`Objects`, or native Boolean properties such as MultiFuse `Shapes`. When the mesh
+links to a baked result, the reader also searches saved history elsewhere in the
+document. Saved inputs must agree with the geometry actually linked to the mesh;
+labels, visibility, and similarity to the reference do not establish provenance.
 
-For a single original STEP body, a standalone `Part::Feature` saved directly as
-a `Solid` on the mesh link is the whole prepared part. It takes precedence over
-detached raw import history when there are no input links. This path does not
-unwrap `Compound`/`CompSolid` results and does not apply to multi-body originals.
+Independent saved clean objects provide another recovery path when their origin
+and occupied material can be verified. If no trustworthy history is available,
+the reader falls back to the actual analysis solids and regroups their Boolean
+fragments by original-body correspondence. A fused result can be partitioned
+against original/reference bodies; added material needs unambiguous ownership.
+Fragments are not independently counted as extra original bodies. A fallback
+runs the same geometry comparison; it never grants an assumed score of 1.
 
-Before scoring saved inputs, the scorer checks that their occupied material
-matches the actual mesh-linked geometry using CAD differences in both directions.
-If CAD differences fail or report a mismatch, an independent mesh Boolean check
-can establish agreement. Its volume tolerances apply to each solid separately,
-so a large assembly does not mask a missing small body. Saved Boolean tolerances
-do not control this check.
-The analysis shape is used only for this consistency check; its Boolean regions
-are never partitioned or reconstructed into scored bodies. A candidate with
-mismatched clean inputs receives zero credit; mismatched reference inputs or a
-failed consistency computation produce an evaluation error. Files are neither
-recomputed nor modified. Missing clean objects remain an evaluation error.
+Explicitly linked inputs that contradict the actual analysis still cause a
+candidate zero or reference evaluation error. Unusable optional detached history
+is ignored in favor of the actual analysis geometry. Unresolvable ownership,
+invalid geometry, or failed diff computation remains an error. Files and their
+feature Proxies are never recomputed or modified.
 
 Unmatched moved parts can be associated by unique shape descriptors; this does
 not align them for scoring. Candidate matching also uses reference clean bodies.
@@ -144,10 +137,10 @@ is performed because position and orientation can be part of the requested edit.
   retains its reported reason in the extraction error. Such failures do not
   produce a numeric FEM or geometry score; they remain distinct from explicitly
   invalid candidate geometry.
-- Both references and candidates must retain their pre-Boolean clean input
-  objects. Baked results can use verified history elsewhere in the document;
-  files containing only the final Boolean result cannot establish the original
-  scoring bodies. This provenance check does not replace FEM/Boolean checks.
+- Saved pre-Boolean inputs are preferred. Baked results can use verified history
+  elsewhere in the document or regroup the actual meshed fragments when history
+  is unavailable. Ambiguous ownership remains an evaluation error. These checks
+  do not replace FEM/Boolean checks.
 - Failed optional splitter removal or tessellation does not discard otherwise
   valid geometry: original-body matching falls back to CAD intersections.
 - The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit.
