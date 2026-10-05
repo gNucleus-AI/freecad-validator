@@ -56,8 +56,7 @@ def clear_doc_cache() -> None:
 
 
 def cached_diff(method: Any, a_doc: BrepDocument, b_doc: BrepDocument) -> Any:
-    """Run (and memoize) `method.diff(a_doc, b_doc)`. `method` is a `BrepDiffMethod`
-    instance; `method.diff` is exception-safe and returns a `DiffResult`."""
+    """Cache successful diffs only; evaluation errors propagate to the caller."""
     key = (a_doc.path, b_doc.path, method.name)
     if key not in _DIFF_CACHE:
         _DIFF_CACHE[key] = method.diff(a_doc, b_doc)

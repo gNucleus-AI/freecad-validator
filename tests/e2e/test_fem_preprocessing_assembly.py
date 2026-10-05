@@ -224,7 +224,7 @@ def test_repeated_parts_are_matched_by_position():
     assert mapped[0].shape.CenterOfMass.x == pytest.approx(5)
 
 
-def test_selected_boolean_inputs_are_used_without_reading_result(tmp_path):
+def test_saved_inputs_do_not_replace_missing_analysis_geometry(tmp_path):
     left = Part.makeBox(10, 10, 10)
     right = Part.makeBox(10, 10, 10, FreeCAD.Vector(10, 0, 0))
     path = tmp_path / "history.FCStd"
@@ -233,9 +233,8 @@ def test_selected_boolean_inputs_are_used_without_reading_result(tmp_path):
     doc.getObject("RenamedBoolean").Shape = Part.Shape()
     doc.save()
     FreeCAD.closeDocument(doc.Name)
-    parts, fragmented = read_clean_bodies(path)
-    assert not fragmented
-    assert [body.shape.Volume for body in parts] == pytest.approx([1000, 1000])
+    with pytest.raises(EvaluationError, match="No solid geometry"):
+        read_clean_bodies(path)
 
 
 def test_saved_inputs_are_found_through_a_wrapper_link(assembly_case):
@@ -244,7 +243,7 @@ def test_saved_inputs_are_found_through_a_wrapper_link(assembly_case):
     wrapper = doc.addObject("Part::Feature", "Wrapper")
     wrapper.addProperty("App::PropertyLink", "Source")
     wrapper.Source = doc.getObject("RenamedBoolean")
-    # The wrapper has no result shape: only the saved object links are relevant.
+    wrapper.Shape = doc.getObject("RenamedBoolean").Shape.copy()
     doc.getObject("Mesh").Shape = wrapper
     doc.save()
     FreeCAD.closeDocument(doc.Name)
@@ -398,6 +397,240 @@ def test_missing_input_links_are_an_error_for_both_roles(tmp_path):
         with pytest.raises(BodyCorrespondenceError, match="Pre-Boolean input objects") as error:
             read_clean_bodies(path, candidate=candidate)
         assert error.value.input_role == role
+
+
+def save_single_part_analysis(path, prepared, original):
+    doc = FreeCAD.newDocument("SinglePartTest")
+    try:
+        imported = doc.addObject("Part::Feature", "Original")
+        imported.Shape = original
+        container = doc.addObject("App::Part", "AnalysisContainer")
+        geometry = doc.addObject("Part::Feature", "Prepared")
+        geometry.Shape = prepared
+        container.addObject(geometry)
+        mesh = doc.addObject("Fem::FemMeshShapeBaseObjectPython", "Mesh")
+        mesh.Shape = geometry
+        doc.recompute()
+        doc.saveAs(str(path))
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+
+
+def test_single_part_uses_prepared_solid_instead_of_detached_raw(tmp_path):
+    clean = Part.makeBox(10, 10, 10)
+    raw = clean.cut(Part.makeCylinder(1.5, 10, FreeCAD.Vector(3, 3, 0)))
+    raw_path = tmp_path / "raw.step"
+    raw.exportStep(str(raw_path))
+    ref = tmp_path / "reference.FCStd"
+    save_single_part_analysis(ref, clean, raw)
+    before = ref.read_bytes()
+    scorer = PreProcessScorer(DiffConfig(region_sample_count=256))
+    result = score_assembly(raw_path, ref, ref, scorer)
+    assert result["reference_changed_body_count"] == 1
+    assert result["correct_body_count"] == 1
+    assert result["score"] == 1
+    assert ref.read_bytes() == before
+    answer = tmp_path / "unprocessed.FCStd"
+    save_single_part_analysis(answer, raw, raw)
+    result = score_assembly(raw_path, ref, answer, scorer)
+    assert result["reference_changed_body_count"] == 1
+    assert result["score"] == 0
+
+
+def test_single_part_compound_is_not_unwrapped_as_prepared_solid(tmp_path):
+    raw = Part.makeBox(10, 10, 10)
+    path = tmp_path / "compound.FCStd"
+    save_analysis(path, [raw], history=False)
+    with pytest.raises(BodyCorrespondenceError, match="Pre-Boolean input objects"):
+        read_clean_bodies(path, raw=[BodyGeometry(raw, "raw")])
+
+
+def test_multi_original_fused_solid_does_not_use_single_part_path(tmp_path):
+    left = Part.makeBox(10, 10, 10)
+    right = Part.makeBox(10, 10, 10, FreeCAD.Vector(10, 0, 0))
+    path = tmp_path / "fused.FCStd"
+    save_analysis(path, [left], history=False)
+    doc = FreeCAD.openDocument(str(path))
+    doc.getObject("RenamedAnalysis").Shape = left.fuse(right).removeSplitter()
+    doc.save()
+    FreeCAD.closeDocument(doc.Name)
+    with pytest.raises(BodyCorrespondenceError, match="Pre-Boolean input objects"):
+        read_clean_bodies(path, raw=[BodyGeometry(left, "a"), BodyGeometry(right, "b")])
+
+
+def save_detached_inputs(path, clean, raw=()):
+    save_analysis(path, clean, history=False)
+    doc = FreeCAD.openDocument(str(path))
+    try:
+        group = doc.addObject("App::Part", "UninformativeGroup")
+        for shape in raw:
+            obj = doc.addObject("Part::Feature", "UninformativeOriginal")
+            obj.Shape = shape
+            group.addObject(obj)
+        for shape in clean:
+            obj = doc.addObject("Part::Feature", "UninformativePrepared")
+            obj.Shape = shape
+            obj.Visibility = False
+        doc.recompute()
+        doc.save()
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+
+
+@pytest.mark.parametrize("with_raw_history", [False, True])
+def test_legacy_detached_clean_inputs_score_without_rewriting_file(
+    assembly_case, tmp_path, with_raw_history
+):
+    raw_path, ref, solid, raw, unchanged = assembly_case
+    answer = tmp_path / "legacy.FCStd"
+    save_detached_inputs(answer, [solid, unchanged], [raw, unchanged] if with_raw_history else [])
+    before = answer.read_bytes()
+    scorer = PreProcessScorer(DiffConfig(region_sample_count=256))
+    result = score_assembly(raw_path, ref, answer, scorer)
+    assert result["score"] == 1
+    assert result["reference_changed_body_count"] == 1
+    assert score_assembly(raw_path, answer, answer, scorer)["score"] == 1
+    assert answer.read_bytes() == before
+
+
+def test_detached_history_preserves_deletions_and_penalizes_extra_changes(assembly_case, tmp_path):
+    raw_path, _, solid, raw, unchanged = assembly_case
+    reference = tmp_path / "legacy_ref.FCStd"
+    answer = tmp_path / "legacy_answer.FCStd"
+    save_detached_inputs(reference, [solid], [raw, unchanged])
+    save_detached_inputs(answer, [solid, unchanged], [raw, unchanged])
+    scorer = PreProcessScorer(DiffConfig(region_sample_count=256))
+    result = score_assembly(raw_path, reference, answer, scorer)
+    assert result["reference_changed_body_count"] == 2
+    assert result["score"] == 0.5
+    extra = Part.makeBox(2, 2, 2, FreeCAD.Vector(80, 0, 0))
+    save_detached_inputs(answer, [solid, extra], [raw, unchanged])
+    result = score_assembly(raw_path, reference, answer, scorer)
+    assert result["extra_changed_body_count"] == 1
+    assert result["score"] == 0.5
+
+
+def test_detached_alternative_versions_are_not_chosen_by_reference_score(assembly_case, tmp_path):
+    raw_path, ref, solid, raw, unchanged = assembly_case
+    answer = tmp_path / "ambiguous.FCStd"
+    save_detached_inputs(answer, [solid, raw, unchanged])
+    with pytest.raises(BodyCorrespondenceError, match="Ambiguous overlapping"):
+        score_assembly(raw_path, ref, answer, PreProcessScorer(DiffConfig(region_sample_count=256)))
+
+
+def test_detached_raw_geometry_is_not_automatically_full_credit(assembly_case, tmp_path):
+    raw_path, ref, _, raw, unchanged = assembly_case
+    answer = tmp_path / "unchanged.FCStd"
+    save_detached_inputs(answer, [raw, unchanged])
+    result = score_assembly(
+        raw_path, ref, answer, PreProcessScorer(DiffConfig(region_sample_count=256))
+    )
+    assert result["score"] == 0
+
+
+@pytest.mark.parametrize("association", ["link", "group"])
+def test_detached_recovery_verifies_analysis_without_scoring_linked_fragments(
+    assembly_case, tmp_path, monkeypatch, association
+):
+    _, _, solid, _, unchanged = assembly_case
+    path = tmp_path / "detached.FCStd"
+    save_detached_inputs(path, [solid, unchanged])
+    doc = FreeCAD.openDocument(str(path))
+    fragment = doc.addObject("Part::Feature", "AnalysisFragment")
+    fragment.Shape = Part.makeBox(1, 1, 1)
+    if association == "link":
+        fragment.addProperty("App::PropertyLink", "Source")
+        fragment.Source = doc.getObject("RenamedAnalysis")
+    else:
+        group = doc.addObject("App::Part", "AnalysisContainer")
+        group.addObject(doc.getObject("RenamedAnalysis"))
+        group.addObject(fragment)
+    doc.save()
+    FreeCAD.closeDocument(doc.Name)
+    original = assembly_module.world_shape
+    reader = Mock(side_effect=original)
+    monkeypatch.setattr(assembly_module, "world_shape", reader)
+    parts, fragmented = read_clean_bodies(path)
+    assert len(parts) == 2
+    assert not fragmented
+    assert reader.call_count == 3
+    assert [body.shape.Volume for body in parts] == pytest.approx([solid.Volume, unchanged.Volume])
+
+
+def test_explicit_empty_input_set_does_not_fall_back_to_detached_parts(assembly_case, tmp_path):
+    _, _, solid, _, unchanged = assembly_case
+    path = tmp_path / "empty_links.FCStd"
+    save_detached_inputs(path, [solid, unchanged])
+    doc = FreeCAD.openDocument(str(path))
+    geometry = doc.getObject("RenamedAnalysis")
+    geometry.addProperty("App::PropertyLinkList", "PreprocessingInputs")
+    geometry.PreprocessingInputs = []
+    doc.save()
+    FreeCAD.closeDocument(doc.Name)
+    with pytest.raises(BodyCorrespondenceError, match="Pre-Boolean input objects"):
+        read_clean_bodies(path)
+
+
+@pytest.mark.parametrize("storage", ["linked", "wrapper", "detached"])
+def test_decoy_inputs_produce_zero_worker_reward(assembly_case, tmp_path, monkeypatch, storage):
+    raw_path, ref, solid, raw, unchanged = assembly_case
+    answer = tmp_path / "decoy.FCStd"
+    if storage == "detached":
+        save_detached_inputs(answer, [solid, unchanged])
+    else:
+        save_analysis(answer, [solid, unchanged])
+    doc = FreeCAD.openDocument(str(answer))
+    geometry = doc.getObject("Mesh").Shape
+    if storage == "wrapper":
+        wrapper = doc.addObject("Part::Feature", "Wrapper")
+        wrapper.addProperty("App::PropertyLink", "Source")
+        wrapper.Source = geometry
+        doc.getObject("Mesh").Shape = wrapper
+        geometry = wrapper
+    geometry.Shape = Part.makeCompound([raw, unchanged])
+    doc.save()
+    FreeCAD.closeDocument(doc.Name)
+    scorer = PreProcessScorer(DiffConfig(region_sample_count=256))
+    with pytest.raises(CandidateGeometryError, match="do not match"):
+        score_assembly(raw_path, ref, answer, scorer)
+    # A bad reference is an evaluator failure, not a candidate zero.
+    with pytest.raises(EvaluationError, match="do not match") as error:
+        score_assembly(raw_path, answer, ref, scorer)
+    assert not isinstance(error.value, CandidateGeometryError)
+    fem = tmp_path / "fem.json"
+    ScoringReport("test", 100.0, "excellent").save(str(fem))
+    output = tmp_path / "combined.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "score",
+            "--assembly",
+            "--raw",
+            str(raw_path),
+            "--reference",
+            str(ref),
+            "--candidate",
+            str(answer),
+            "--fem-report",
+            str(fem),
+            "--out",
+            str(output),
+        ],
+    )
+    main()
+    report = json.loads(output.read_text())
+    assert report["geometry"]["status"] == "candidate_invalid"
+    assert report["geometry"]["score"] == 0
+    assert report["reward"] == 0
+    assert report["overall_score"] == 0
+
+
+def test_input_verification_failure_does_not_become_candidate_zero(monkeypatch):
+    body = BodyGeometry(Mock(), "prepared")
+    body.shape.cut.side_effect = Part.OCCError("injected verification failure")
+    with pytest.raises(BodyCorrespondenceError, match="injected verification failure"):
+        assembly_module.verify_clean_inputs([body], Part.makeBox(1, 1, 1), "candidate")
 
 
 @pytest.mark.parametrize("invalid", ["empty", "multiple_meshes"])

@@ -1,6 +1,7 @@
 """Automatic original-body correspondence for saved preprocessing assemblies.
 
-Read saved inputs before Boolean operations, never their resulting fragments.
+Score saved inputs before Boolean operations, never their resulting fragments.
+Verify those inputs against the actual analysis geometry before scoring.
 Names, labels and visibility are not correspondence evidence. Match whole input
 bodies in world coordinates against the raw originals.
 """
@@ -55,6 +56,9 @@ class BodyGeometry:
 
 
 def world_shape(obj):
+    shape = getattr(obj, "Shape", None)
+    if isinstance(shape, Part.Shape) and shape.isNull():
+        return shape.copy()
     return Part.getShape(obj, mat=obj.getGlobalPlacement().Matrix, transform=False).copy()
 
 
@@ -123,12 +127,125 @@ def linked_boolean_inputs(feature, role):
     return None
 
 
-def read_clean_bodies(path, *, candidate=False):
-    """Read explicitly saved pre-Boolean inputs of the selected FEM geometry.
+def same_solid_geometry(left, right):
+    """Recognize raw import history geometrically, independent of face splits."""
+    tolerance = max(left.Volume, right.Volume, 1.0) * 1e-8
+    if abs(left.Volume - right.Volume) > tolerance:
+        return False
+    if (left.CenterOfMass - right.CenterOfMass).Length > 1e-6:
+        return False
+    return left.cut(right).Volume + right.cut(left).Volume <= tolerance
 
-    Only object links identify the input set. Missing input history is an
-    evaluation error: post-Boolean solids cannot substitute for clean bodies.
-    No Boolean-result geometry is inspected or used to verify those inputs.
+
+def verify_clean_inputs(bodies, analyzed, role):
+    """Check occupied material only; analyzed regions never become scored bodies."""
+    try:
+        mismatch = any(
+            body.shape.cut(analyzed).Volume > max(1e-5, body.shape.Volume * 1e-8) for body in bodies
+        )
+        if not mismatch:
+            prepared = Part.makeCompound([body.shape for body in bodies])
+            mismatch = analyzed.cut(prepared).Volume > max(1e-5, analyzed.Volume * 1e-8)
+    except Part.OCCError as exc:
+        raise BodyCorrespondenceError(
+            f"Cannot verify saved clean inputs against analysis geometry: {exc}",
+            role,
+        ) from exc
+    if mismatch:
+        error_type = CandidateGeometryError if role == "candidate" else EvaluationError
+        raise error_type("Saved clean inputs do not match the actual analysis geometry")
+
+
+def detached_clean_bodies(doc, analysis, raw, path, role, error_type):
+    """Recover independent saved parts when a baked analysis lost input links.
+
+    Never read the analysis shape or its dependencies/dependents. A complete
+    raw import group can be identified against STEP and omitted when a separate
+    prepared set exists. No choice is based on similarity to the reference.
+    """
+    excluded = {
+        obj.Name for obj in [analysis, *analysis.OutListRecursive, *analysis.InListRecursive]
+    }
+    # Baked analysis containers often also store individual result regions as
+    # siblings, without links from those regions to the compound snapshot.
+    for parent in analysis.InListRecursive:
+        if parent.TypeId in {"App::Part", "App::DocumentObjectGroup"}:
+            excluded.update(obj.Name for obj in parent.OutListRecursive)
+    # Recognizable Boolean outputs elsewhere in the document are not inputs.
+    for obj in doc.Objects:
+        if boolean_input_objects(obj) is not None:
+            excluded.update(item.Name for item in [obj, *obj.InListRecursive])
+    objects = [
+        obj
+        for obj in doc.Objects
+        if obj.Name not in excluded and obj.isDerivedFrom("Part::Feature")
+    ]
+    names = {obj.Name for obj in objects}
+    # Retain terminal features, not intermediate construction history or tips
+    # already represented by a PartDesign Body.
+    objects = [
+        obj for obj in objects if not any(parent.Name in names for parent in obj.InListRecursive)
+    ]
+    saved = {}
+    for obj in objects:
+        shape = world_shape(obj)
+        if shape.isNull() or not shape.Solids:
+            continue  # Direction lines and other non-solid helper objects.
+        saved[obj.Name] = solid_bodies(shape, f"{path}:{obj.Name}", error_type)
+    if not saved:
+        return []
+
+    raw_groups = set()
+    if raw:
+        for group in doc.Objects:
+            if group.TypeId not in {"App::Part", "App::DocumentObjectGroup"}:
+                continue
+            members = frozenset(obj.Name for obj in group.OutListRecursive if obj.Name in saved)
+            parts = [body for name in members for body in saved[name]]
+            if len(parts) != len(raw) or len(members) == len(saved):
+                continue
+            unmatched = list(raw)
+            for body in parts:
+                matches = [
+                    i
+                    for i, original in enumerate(unmatched)
+                    if same_solid_geometry(body.shape, original.shape)
+                ]
+                if len(matches) != 1:
+                    break
+                unmatched.pop(matches[0])
+            else:
+                raw_groups.add(members)
+    if len(raw_groups) > 1:
+        raise BodyCorrespondenceError("Multiple detached raw import histories", role)
+    if raw_groups:
+        for name in next(iter(raw_groups)):
+            del saved[name]
+    bodies = [body for parts in saved.values() for body in parts]
+    # Alternative saved versions cannot be selected by which one scores better.
+    # Touching parts are allowed; substantially overlapping detached versions
+    # need input links to resolve their provenance.
+    for index, body in enumerate(bodies):
+        for other in bodies[:index]:
+            if not body.shape.BoundBox.intersect(other.shape.BoundBox):
+                continue
+            overlap = body.shape.common(other.shape).Volume
+            if overlap > 0.5 * min(body.shape.Volume, other.shape.Volume):
+                raise BodyCorrespondenceError(
+                    "Ambiguous overlapping detached pre-Boolean objects",
+                    role,
+                )
+    logging.info("Recovered %d detached pre-Boolean bodies from %s", len(bodies), path)
+    return bodies
+
+
+def read_clean_bodies(path, *, candidate=False, raw=None):
+    """Read saved pre-Boolean inputs, including legacy detached clean objects.
+
+    Input links take precedence; detached parts provide a legacy fallback.
+    Missing or ambiguous inputs remain an evaluation error.
+    The selected inputs must occupy the same material as the analysis geometry.
+    Analysis regions are used for verification only, never body correspondence.
     """
     path = Path(path)
     role = "candidate" if candidate else "reference"
@@ -149,8 +266,9 @@ def read_clean_bodies(path, *, candidate=False):
             link = link[0]
         if link is None or not hasattr(link, "PropertiesList"):
             raise BodyCorrespondenceError("Missing link to pre-Boolean input objects", role)
+        analyzed = world_shape(link)
+        analyzed_bodies = solid_bodies(analyzed, f"{path}:{link.Name}", error_type)
         # A native single-body model has no assembly Boolean result to unwrap.
-        # Opaque Part::Feature snapshots cannot establish this distinction.
         if link.TypeId in {
             "Part::Box",
             "Part::Cylinder",
@@ -158,8 +276,25 @@ def read_clean_bodies(path, *, candidate=False):
             "Part::Cone",
             "Part::Torus",
         } or link.isDerivedFrom("PartDesign::Body"):
-            return solid_bodies(world_shape(link), f"{path}:{link.Name}", error_type), False
+            return analyzed_bodies, False
         inputs = linked_boolean_inputs(link, role)
+        if inputs is None:
+            # Single-part preprocessing may store the prepared solid directly
+            # on the mesh feature while retaining the unmodified STEP import.
+            # Use that whole solid, not the detached raw copy. Do not unwrap a
+            # Compound/CompSolid or extend this to a multi-original assembly.
+            if (
+                raw is not None
+                and len(raw) == 1
+                and link.TypeId == "Part::Feature"
+                and not link.OutList
+            ):
+                if analyzed.ShapeType == "Solid":
+                    return analyzed_bodies, False
+            bodies = detached_clean_bodies(doc, link, raw, path, role, error_type)
+            if bodies:
+                verify_clean_inputs(bodies, analyzed, role)
+                return bodies, False
         if not inputs:
             raise BodyCorrespondenceError(
                 "Pre-Boolean input objects are not saved on the selected analysis feature; "
@@ -171,6 +306,7 @@ def read_clean_bodies(path, *, candidate=False):
             if obj is None or obj == link:
                 raise BodyCorrespondenceError("Invalid pre-Boolean input link", role)
             bodies.extend(solid_bodies(world_shape(obj), f"{path}:{obj.Name}", error_type))
+        verify_clean_inputs(bodies, analyzed, role)
         return bodies, False
     finally:
         FreeCAD.closeDocument(doc.Name)
@@ -205,7 +341,7 @@ def descriptor_distance(left, right):
     extent = (
         sum(
             abs(math.log(max(x, 1e-9) / max(y, 1e-9)))
-            for x, y in zip(extent_a, extent_b, strict=True)
+            for x, y in zip(extent_a, extent_b, strict=False)
         )
         / 3
     )
@@ -244,7 +380,7 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
     if parts:
         quality = overlaps / np.maximum(np.minimum(raw_volumes[:, None], volumes[None, :]), 1e-12)
         rows, columns = linear_sum_assignment(-quality)
-        for i, j in zip(rows, columns, strict=True):
+        for i, j in zip(rows, columns, strict=False):
             if quality[i, j] >= 0.1:
                 ownership[i].append(int(j))
                 contributions[i].append(parts[j].shape)
@@ -267,7 +403,7 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
             ]
         )
         rows, columns = linear_sum_assignment(costs)
-        for row, column in zip(rows, columns, strict=True):
+        for row, column in zip(rows, columns, strict=False):
             cost = costs[row, column]
             alternatives = np.delete(costs[:, column], row)
             if cost > 0.3 or np.any(alternatives <= cost + 0.02):
@@ -292,22 +428,24 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
 
 def score_assembly(raw_path, reference_path, candidate_path, scorer):
     raw = read_raw_bodies(raw_path)
-    ref_parts, ref_fragmented = read_clean_bodies(reference_path)
+    ref_parts, ref_fragmented = read_clean_bodies(reference_path, raw=raw)
     reference, extra_reference, ref_map = regroup_bodies(raw, ref_parts, ref_fragmented)
     if extra_reference:
         raise EvaluationError(
             f"Reference has {len(extra_reference)} solids without an original-body correspondence"
         )
-    answer_parts, answer_fragmented = read_clean_bodies(candidate_path, candidate=True)
+    answer_parts, answer_fragmented = read_clean_bodies(candidate_path, candidate=True, raw=raw)
     answer, extra_answer, answer_map = regroup_bodies(
         raw, answer_parts, answer_fragmented, reference
     )
     results = {}
     with TemporaryDirectory(prefix="fem-original-bodies-") as directory:
-        for i, (original, target, candidate) in enumerate(zip(raw, reference, answer, strict=True)):
+        for i, (original, target, candidate) in enumerate(
+            zip(raw, reference, answer, strict=False)
+        ):
             paths = []
             for role, body in zip(
-                ("raw", "reference", "candidate"), (original, target, candidate), strict=True
+                ("raw", "reference", "candidate"), (original, target, candidate), strict=False
             ):
                 path = Path(directory) / f"{i + 1}_{role}.FCStd"
                 if body is not None:

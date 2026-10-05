@@ -65,16 +65,28 @@ evaluation.
 
 Automatic correspondence counts raw STEP solids as original bodies and matches
 saved **pre-Boolean clean inputs** one-to-one in world coordinates. The selected
-analysis feature must retain input links: `PreprocessingInputs`, Boolean
+analysis feature can retain input links: `PreprocessingInputs`, Boolean
 Fragments `Objects`, or supported native Boolean input properties such as
 MultiFuse `Shapes`. These links identify clean bodies; object labels and
-visibility do not select geometry.
+visibility do not select geometry. When links are absent, legacy documents can
+instead supply independent saved clean parts outside the analysis dependency
+graph. Intermediate construction objects are excluded. A complete raw import
+group is omitted only when its bodies geometrically match the supplied raw STEP
+and separate prepared objects exist. Ambiguous overlapping saved versions remain
+an evaluation error; the reference score is never used to choose a version.
 
-The preprocessing scorer never reads, compares, verifies, partitions or rebuilds
-the Boolean-result geometry. Missing pre-Boolean input links are an evaluation
-error, not permission to use analyzed solids. Scripts performing Boolean
-operations on detached shapes must save their clean input bodies and link them
-through `PreprocessingInputs`. FEM and Boolean validation remain separate.
+For a single original STEP body, a standalone `Part::Feature` saved directly as
+a `Solid` on the mesh link is the whole prepared part. It takes precedence over
+detached raw import history when there are no input links. This path does not
+unwrap `Compound`/`CompSolid` results and does not apply to multi-body originals.
+
+Before scoring saved inputs, the scorer checks that their occupied material
+matches the actual mesh-linked geometry using CAD differences in both directions.
+The analysis shape is used only for this consistency check; its Boolean regions
+are never partitioned or reconstructed into scored bodies. A candidate with
+mismatched clean inputs receives zero credit; mismatched reference inputs or a
+failed consistency computation produce an evaluation error. Files are neither
+recomputed nor modified. Missing clean objects remain an evaluation error.
 
 Unmatched moved parts can be associated by unique shape descriptors; this does
 not align them for scoring. Candidate matching also uses reference clean bodies.
@@ -129,13 +141,18 @@ is performed because position and orientation can be part of the requested edit.
   produce a numeric FEM or geometry score; they remain distinct from explicitly
   invalid candidate geometry.
 - Both references and candidates must retain their pre-Boolean clean input
-  objects. Baked results without input links cannot be evaluated by this scorer.
-  The separate FEM/Boolean checks handle downstream analysis geometry.
+  objects. Baked results can use verified history elsewhere in the document;
+  files containing only the final Boolean result cannot establish the original
+  scoring bodies. This provenance check does not replace FEM/Boolean checks.
 - Failed optional splitter removal or tessellation does not discard otherwise
   valid geometry: original-body matching falls back to CAD intersections.
 - The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit.
   Exceeding it terminates the worker process group and raises an extraction error;
   a timeout is not treated as invalid candidate geometry.
+- A failed diff raises an evaluation error rather than an empty change set.
+  Failed diffs are not cached. The assembly worker exits with an error report
+  and no geometry score or combined FEM reward; successful empty diffs remain
+  distinct from computation failures.
 - Region overlap defaults to 8,192 deterministic samples. Small or scattered edits
   may be undersampled; inspect the reported counts and rerun with more samples.
   Zero sampled changed volume is not proof that the shapes are equivalent.
