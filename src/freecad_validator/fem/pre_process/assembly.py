@@ -1,0 +1,302 @@
+"""Automatic original-body correspondence for saved preprocessing assemblies.
+
+Read saved inputs before Boolean operations, never their resulting fragments.
+Names, labels and visibility are not correspondence evidence. Match whole input
+bodies in world coordinates against the raw originals.
+"""
+
+import logging
+import math
+from dataclasses import dataclass
+from functools import cached_property
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import FreeCAD
+import numpy as np
+import Part
+from scipy.optimize import linear_sum_assignment
+
+from freecad_validator.fem.analysis_context import (
+    _is_result_object,
+    find_replay_context,
+)
+from freecad_validator.fem.pre_process.errors import (
+    BodyCorrespondenceError,
+    CandidateGeometryError,
+    EvaluationError,
+)
+from freecad_validator.fem.pre_process.geometry import export_geometry, refine_geometry
+from freecad_validator.fem.pre_process.geometry_compare.brep_diff.methods.mesh_boolean import (
+    tessellate_shape,
+    to_manifold,
+)
+from freecad_validator.fem.pre_process.policy import aggregate_body_scores, score_body_edit
+
+
+@dataclass
+class BodyGeometry:
+    shape: object
+    source: str
+
+    @cached_property
+    def mesh(self):
+        # This coarse mesh finds correspondence only; body scoring uses its own
+        # established tolerances and changed-region samples, not these overlaps.
+        try:
+            mesh = to_manifold(*tessellate_shape(self.shape.removeSplitter(), 0.05))
+        except Part.OCCError:
+            # Refinement/tessellation can fail on valid saved Boolean regions.
+            # Correspondence can still use exact CAD intersections below.
+            return None
+        if mesh.is_empty() or mesh.volume() <= 0:
+            return None
+        return mesh
+
+
+def world_shape(obj):
+    return Part.getShape(obj, mat=obj.getGlobalPlacement().Matrix, transform=False).copy()
+
+
+def solid_bodies(shape, source, error_type=EvaluationError):
+    if not isinstance(shape, Part.Shape) or shape.isNull() or not shape.Solids:
+        raise error_type(f"No solid geometry in {source}")
+    bodies = []
+    for index, solid in enumerate(shape.Solids):
+        if not solid.isValid() or solid.Volume <= 0:
+            raise error_type(f"Invalid solid {index + 1} in {source}")
+        bodies.append(BodyGeometry(solid.copy(), f"{source}/Solid{index + 1}"))
+    return bodies
+
+
+def read_raw_bodies(path):
+    path = Path(path)
+    if not path.is_file():
+        raise EvaluationError(f"Raw STEP does not exist: {path}")
+    shape = Part.Shape()
+    shape.read(str(path))
+    return solid_bodies(shape, str(path))
+
+
+def boolean_input_objects(feature):
+    """Read input links only; do not inspect or validate the Boolean result."""
+    properties = set(feature.PropertiesList)
+    if "PreprocessingInputs" in properties:
+        return list(feature.PreprocessingInputs)
+    if {"Objects", "Mode"} <= properties:
+        return list(feature.Objects)
+    if feature.TypeId == "Part::MultiFuse" and "Shapes" in properties:
+        return list(feature.Shapes)
+    if feature.TypeId in {"Part::Fuse", "Part::MultiCommon", "Part::Common"}:
+        if "Shapes" in properties:
+            return list(feature.Shapes)
+        if {"Base", "Tool"} <= properties:
+            return [feature.Base, feature.Tool]
+    return None
+
+
+def read_clean_bodies(path, *, candidate=False):
+    """Read explicitly saved pre-Boolean inputs of the selected FEM geometry.
+
+    Only object links identify the input set. Missing input history is an
+    evaluation error: post-Boolean solids cannot substitute for clean bodies.
+    No Boolean-result geometry is inspected or used to verify those inputs.
+    """
+    path = Path(path)
+    role = "candidate" if candidate else "reference"
+    error_type = CandidateGeometryError if candidate else EvaluationError
+    if not path.is_file():
+        raise error_type(f"Clean FCStd does not exist: {path}")
+    doc = FreeCAD.openDocument(str(path))
+    try:
+        meshes = [obj for obj in doc.Objects if "FemMeshShape" in obj.TypeId]
+        result = next((obj for obj in doc.Objects if _is_result_object(obj)), None)
+        if result is not None:
+            _, _, source_mesh = find_replay_context(doc, result, len(result.DisplacementLengths))
+            meshes = [source_mesh]
+        if len(meshes) != 1:
+            raise error_type(f"Expected one source FEM mesh in {path}, found {len(meshes)}")
+        link = getattr(meshes[0], "Shape", None) or getattr(meshes[0], "Part", None)
+        if isinstance(link, tuple):
+            link = link[0]
+        if link is None or not hasattr(link, "PropertiesList"):
+            raise BodyCorrespondenceError("Missing link to pre-Boolean input objects", role)
+        # A native single-body model has no assembly Boolean result to unwrap.
+        # Opaque Part::Feature snapshots cannot establish this distinction.
+        if link.TypeId in {
+            "Part::Box",
+            "Part::Cylinder",
+            "Part::Sphere",
+            "Part::Cone",
+            "Part::Torus",
+        } or link.isDerivedFrom("PartDesign::Body"):
+            return solid_bodies(world_shape(link), f"{path}:{link.Name}", error_type), False
+        inputs = boolean_input_objects(link)
+        if not inputs:
+            raise BodyCorrespondenceError(
+                "Pre-Boolean input objects are not saved on the selected analysis feature; "
+                "post-Boolean geometry is not used for preprocessing scoring",
+                role,
+            )
+        bodies = []
+        for obj in inputs:
+            if obj is None or obj == link:
+                raise BodyCorrespondenceError("Invalid pre-Boolean input link", role)
+            bodies.extend(solid_bodies(world_shape(obj), f"{path}:{obj.Name}", error_type))
+        return bodies, False
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+
+
+def overlap_matrix(anchors, parts):
+    overlaps = np.zeros((len(anchors), len(parts)))
+    for i, anchor in enumerate(anchors):
+        if anchor is None:
+            continue
+        for j, part in enumerate(parts):
+            if anchor.shape.BoundBox.intersect(part.shape.BoundBox):
+                if anchor.mesh is not None and part.mesh is not None:
+                    volume = float((anchor.mesh ^ part.mesh).volume())
+                else:
+                    # Some valid STEP solids have non-watertight cached facets.
+                    # Use the CAD intersection for correspondence in that case.
+                    volume = anchor.shape.common(part.shape).Volume
+                overlaps[i, j] = max(0.0, volume)
+    return overlaps
+
+
+def descriptor_distance(left, right):
+    """Position-independent fallback for moved parts or failed CAD intersections.
+
+    Used only for unmatched originals/solids, never to award geometry credit.
+    Actual location/orientation is still compared by PreProcessScorer.
+    """
+    a, b = left.shape, right.shape
+    extent_a = sorted((a.BoundBox.XLength, a.BoundBox.YLength, a.BoundBox.ZLength))
+    extent_b = sorted((b.BoundBox.XLength, b.BoundBox.YLength, b.BoundBox.ZLength))
+    extent = (
+        sum(
+            abs(math.log(max(x, 1e-9) / max(y, 1e-9)))
+            for x, y in zip(extent_a, extent_b, strict=True)
+        )
+        / 3
+    )
+    return (
+        0.4 * abs(math.log(a.Volume / b.Volume))
+        + 0.2 * abs(math.log(a.Area / b.Area))
+        + 0.4 * extent
+    )
+
+
+def regroup_bodies(raw, parts, fragmented, reference=None):
+    """Keep correspondence failures distinct from invalid submitted geometry."""
+    role = "reference" if reference is None else "candidate"
+    try:
+        return _regroup_bodies(raw, parts, fragmented, reference)
+    except (EvaluationError, Part.OCCError) as exc:
+        raise BodyCorrespondenceError(str(exc), role) from exc
+
+
+def _regroup_bodies(raw, parts, fragmented, reference=None):
+    """Match saved whole input bodies one-to-one without rebuilding fragments."""
+    if fragmented:
+        raise EvaluationError("Post-Boolean fragments are not preprocessing inputs")
+    overlaps = overlap_matrix(raw, parts)
+    if reference is not None:
+        overlaps = np.maximum(overlaps, overlap_matrix(reference, parts))
+    volumes = np.array([body.shape.Volume for body in parts])
+    raw_volumes = np.array([body.shape.Volume for body in raw])
+    if reference is not None:
+        raw_volumes = np.maximum(
+            raw_volumes, [body.shape.Volume if body else 0 for body in reference]
+        )
+    ownership = [[] for _ in raw]
+    contributions = [[] for _ in raw]
+    assigned = set()
+    if parts:
+        quality = overlaps / np.maximum(np.minimum(raw_volumes[:, None], volumes[None, :]), 1e-12)
+        rows, columns = linear_sum_assignment(-quality)
+        for i, j in zip(rows, columns, strict=True):
+            if quality[i, j] >= 0.1:
+                ownership[i].append(int(j))
+                contributions[i].append(parts[j].shape)
+                assigned.add(int(j))
+    missing = [i for i, indices in enumerate(ownership) if not indices]
+    remaining = [j for j in range(len(parts)) if j not in assigned]
+    if missing and remaining:
+        costs = np.array(
+            [
+                [
+                    min(
+                        descriptor_distance(raw[i], parts[j]),
+                        descriptor_distance(reference[i], parts[j])
+                        if reference is not None and reference[i] is not None
+                        else float("inf"),
+                    )
+                    for j in remaining
+                ]
+                for i in missing
+            ]
+        )
+        rows, columns = linear_sum_assignment(costs)
+        for row, column in zip(rows, columns, strict=True):
+            cost = costs[row, column]
+            alternatives = np.delete(costs[:, column], row)
+            if cost > 0.3 or np.any(alternatives <= cost + 0.02):
+                continue
+            i, j = missing[row], remaining[column]
+            ownership[i].append(j)
+            contributions[i].append(parts[j].shape)
+            assigned.add(j)
+    rebuilt = []
+    for i, indices in enumerate(ownership):
+        if not indices:
+            rebuilt.append(None)
+            continue
+        shapes = contributions[i]
+        shape = shapes[0].copy()
+        shape = refine_geometry(shape)
+        if shape.isNull() or not shape.isValid() or not shape.Solids:
+            raise EvaluationError(f"Cannot reconstruct original body {i + 1}")
+        rebuilt.append(BodyGeometry(shape, f"Body{i + 1}"))
+    return rebuilt, [part for j, part in enumerate(parts) if j not in assigned], ownership
+
+
+def score_assembly(raw_path, reference_path, candidate_path, scorer):
+    raw = read_raw_bodies(raw_path)
+    ref_parts, ref_fragmented = read_clean_bodies(reference_path)
+    reference, extra_reference, ref_map = regroup_bodies(raw, ref_parts, ref_fragmented)
+    if extra_reference:
+        raise EvaluationError(
+            f"Reference has {len(extra_reference)} solids without an original-body correspondence"
+        )
+    answer_parts, answer_fragmented = read_clean_bodies(candidate_path, candidate=True)
+    answer, extra_answer, answer_map = regroup_bodies(
+        raw, answer_parts, answer_fragmented, reference
+    )
+    results = {}
+    with TemporaryDirectory(prefix="fem-original-bodies-") as directory:
+        for i, (original, target, candidate) in enumerate(zip(raw, reference, answer, strict=True)):
+            paths = []
+            for role, body in zip(
+                ("raw", "reference", "candidate"), (original, target, candidate), strict=True
+            ):
+                path = Path(directory) / f"{i + 1}_{role}.FCStd"
+                if body is not None:
+                    export_geometry(body.shape, path)
+                paths.append(path if body is not None else None)
+            results[f"Body{i + 1}"] = scorer.score_detailed(*paths)
+            logging.info("Preprocessing: scored original body %d/%d", i + 1, len(raw))
+    for i in range(len(extra_answer)):
+        results[f"ExtraBody{i + 1}"] = score_body_edit(False, True)
+    return {
+        **aggregate_body_scores(results),
+        "correspondence": {
+            "original_body_count": len(raw),
+            "reference_fragmented": ref_fragmented,
+            "candidate_fragmented": answer_fragmented,
+            "reference": ref_map,
+            "candidate": answer_map,
+            "extra_candidate_body_count": len(extra_answer),
+        },
+    }

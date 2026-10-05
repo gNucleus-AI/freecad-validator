@@ -34,6 +34,7 @@ from typing import Any
 
 from freecad_validator._freecad_loader import resolve_freecad_command
 from freecad_validator.fem.mesh_budget import default_node_cap
+from freecad_validator.fem.pre_process.integration import apply_preprocessing_score
 from freecad_validator.fem.schema import (
     DISP_TOL,
     GROSS_TOL,
@@ -61,6 +62,7 @@ from freecad_validator.fem.topology_compare import (
 HERE = Path(__file__).resolve().parent
 FCSTD_ADAPTER = str(HERE / "adapters" / "fcstd.py")
 STEP_ADAPTER = str(HERE / "adapters" / "step.py")
+PREPROCESSING_ADAPTER = str(HERE / "adapters" / "pre_process.py")
 
 
 class ExtractionError(RuntimeError):
@@ -339,6 +341,7 @@ def score_trusted_payloads(
     mesh_budget_zero_ratio: float = MESH_BUDGET_ZERO_RATIO,
     geometry_source: str = "STEP",
     max_node_count: int | None = None,
+    preprocessing_score: float | None = None,
 ) -> ScoringReport:
     """Score validator-generated extraction payloads without FreeCAD.
 
@@ -377,7 +380,7 @@ def score_trusted_payloads(
         f"mesh_budget: candidate={cand_n} nodes vs reference baseline={base_n}; "
         f"cap={case.mesh_expectations['max_node_count']} nodes",
     )
-    return report
+    return apply_preprocessing_score(report, preprocessing_score)
 
 
 def _terminate_process_tree(process: subprocess.Popen) -> None:
@@ -465,7 +468,7 @@ def _run_adapter(
                 raise ExtractionError(
                     f"adapter timed out after {timeout_seconds:g} seconds"
                 ) from exc
-        if return_code != 0 or not os.path.exists(out_path):
+        if not os.path.exists(out_path):
             diagnostic = _diagnostic_tail(log_path)
             detail = diagnostic or "adapter produced no diagnostic output"
             raise ExtractionError(f"adapter failed with exit {return_code}: {detail}")
@@ -477,6 +480,10 @@ def _run_adapter(
         raise ExtractionError(f"adapter extraction failed: {exc}") from exc
     if not isinstance(payload, dict):
         raise ExtractionError("adapter JSON is not an object")
+    if return_code != 0:
+        detail = payload.get("error") if payload.get("status") == "evaluation_error" else None
+        detail = detail or _diagnostic_tail(log_path) or "adapter did not complete successfully"
+        raise ExtractionError(f"adapter failed with exit {return_code}: {detail}")
     return payload
 
 
@@ -645,6 +652,37 @@ def _score_step_fcstd(
         max_node_count=max_node_count,
     )
     report.runtime_provenance = dict(runtime_provenance)
+    if require_preprocessing and report.overall_score > 0:
+        geometry_report = _extract(
+            fc,
+            PREPROCESSING_ADAPTER,
+            step_path,
+            os.path.join(extract_dir, f"{tag}_preprocessing.json"),
+            extra_args=[
+                os.path.abspath(fcstd_path_reference),
+                os.path.abspath(fcstd_path_candidate),
+            ],
+            timeout_seconds=timeout_seconds,
+        )
+        if geometry_report.get("status") == "evaluation_error":
+            raise ExtractionError(
+                f"Preprocessing evaluation failed: {geometry_report.get('error')}"
+            )
+        if geometry_report.get("status") == "candidate_invalid":
+            combined = apply_preprocessing_score(report, 0.0)
+            combined.evidence.append(
+                f"preprocessing_candidate_invalid: {geometry_report.get('error')}"
+            )
+            return combined
+        if "score" not in geometry_report or "reference_changed_body_count" not in geometry_report:
+            raise ExtractionError("Preprocessing worker did not return a task geometry score")
+        geometry_score = geometry_report["score"]
+        if geometry_score is None and (
+            geometry_report["reference_changed_body_count"] != 0
+            or geometry_report.get("extra_changed_body_count") != 0
+        ):
+            raise ExtractionError("Preprocessing worker returned no score for changed bodies")
+        return apply_preprocessing_score(report, geometry_score)
     return report
 
 

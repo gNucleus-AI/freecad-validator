@@ -26,21 +26,29 @@ def test_material_counts_from_real_freecad_solids(tmp_path):
 
 @pytest.mark.needs_freecad
 @pytest.mark.needs_calculix
-def test_generated_cantilever_replays_with_calculix(tmp_path):
+@pytest.mark.parametrize("preprocessing", [False, True])
+def test_generated_cantilever_replays_with_calculix(tmp_path, preprocessing):
     freecad_cmd = resolve_freecad_command()
     step_path = tmp_path / "cantilever.step"
     reference_path = tmp_path / "reference.FCStd"
     candidate_path = tmp_path / "candidate.FCStd"
     generator = Path(__file__).with_name("generate_fem_fixture.py")
 
+    command = [freecad_cmd, str(generator), str(step_path), str(reference_path)]
+    if preprocessing:
+        command.append("raw-hole")
     subprocess.run(
-        [freecad_cmd, str(generator), str(step_path), str(reference_path)],
+        command,
         check=True,
         timeout=180,
     )
     shutil.copy2(reference_path, candidate_path)
 
-    report = FEMValidator(freecad_cmd=freecad_cmd, timeout_seconds=180).validate(
+    report = FEMValidator(
+        freecad_cmd=freecad_cmd,
+        timeout_seconds=180,
+        require_preprocessing=preprocessing,
+    ).validate(
         step_path=str(step_path),
         reference_fcstd=str(reference_path),
         candidate_fcstd=str(candidate_path),
@@ -50,3 +58,6 @@ def test_generated_cantilever_replays_with_calculix(tmp_path):
     assert report.gates_triggered == []
     assert report.runtime_provenance["freecad"].startswith("1.1")
     assert report.runtime_provenance["calculix"]
+    if preprocessing:
+        assert report.subscores_details["preprocessing"]["multiplier"] == 1.0
+        assert report.pass_fail_flags["preprocessing_correct"]

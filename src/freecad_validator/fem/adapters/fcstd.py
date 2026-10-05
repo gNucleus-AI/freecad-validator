@@ -89,6 +89,19 @@ geometry_spec.loader.exec_module(geometry)
 geometry_facts = geometry.geometry_facts
 
 
+context_path = Path(__file__).resolve().parents[1] / "analysis_context.py"
+context_spec = importlib.util.spec_from_file_location(
+    "_freecad_validator_analysis_context", context_path
+)
+if context_spec is None or context_spec.loader is None:
+    raise ImportError(f"cannot load analysis context module from {context_path}")
+analysis_context = importlib.util.module_from_spec(context_spec)
+context_spec.loader.exec_module(analysis_context)
+_is_result_object = analysis_context._is_result_object
+find_replay_context = analysis_context.find_replay_context
+linked_mesh_shape = analysis_context.linked_mesh_shape
+
+
 def runtime_info(require_calculix=False):
     """Return runtime versions and optionally verify the configured solver."""
     import Part
@@ -141,14 +154,6 @@ def qty(value, unit):
         return float(value)
 
 
-def _is_result_object(obj):
-    """A loaded mechanical FEM result (has nodal fields). Single source of truth
-    for what counts as a 'result', shared by discovery, the pre-replay purge and
-    replay-output selection so they can never disagree (a disagreement would be a
-    hole: a result invisible to the purge but visible to selection)."""
-    return obj.TypeId == "Fem::FemResultObjectPython" and getattr(obj, "NodeNumbers", None)
-
-
 def find_result(doc):
     for o in doc.Objects:
         if _is_result_object(o):
@@ -192,41 +197,6 @@ def snapshot_result_fields(res):
         "node_numbers": [int(node) for node in list(getattr(res, "NodeNumbers", []) or [])],
         "fields": fields,
     }
-
-
-def find_replay_context(doc, result, solved_node_count):
-    analyses = [obj for obj in doc.Objects if obj.TypeId == "Fem::FemAnalysis"]
-    matching_analyses = []
-    for analysis in analyses:
-        group = list(getattr(analysis, "Group", []) or [])
-        if result in group or getattr(result, "Mesh", None) in group:
-            matching_analyses.append(analysis)
-    if len(matching_analyses) != 1:
-        raise RuntimeError(
-            "stored FEM result is not owned by exactly one analysis "
-            f"(found {len(matching_analyses)})"
-        )
-
-    analysis = matching_analyses[0]
-    group = list(getattr(analysis, "Group", []) or [])
-    solvers = [obj for obj in group if "Solver" in obj.TypeId or "Ccx" in obj.TypeId]
-    if len(solvers) != 1:
-        raise RuntimeError(
-            f"analysis must contain exactly one solver for replay (found {len(solvers)})"
-        )
-
-    source_meshes = []
-    for obj in group:
-        fem_mesh = getattr(obj, "FemMesh", None)
-        node_count = getattr(fem_mesh, "NodeCount", 0) if fem_mesh is not None else 0
-        if "FemMeshShape" in obj.TypeId and node_count == solved_node_count:
-            source_meshes.append(obj)
-    if len(source_meshes) != 1:
-        raise RuntimeError(
-            "analysis must contain exactly one source mesh matching the stored result "
-            f"({solved_node_count} nodes; found {len(source_meshes)})"
-        )
-    return analysis, solvers[0], source_meshes[0]
 
 
 def verify_solver_replay(doc, stored_result, analysis_type, output_path):
@@ -360,16 +330,6 @@ def extract_material_body_counts(objects, total_solids):
             count += total_solids - assigned_count
         counts.append({**group["values"], "body_count": count})
     return grouped_material_counts(counts)
-
-
-def linked_mesh_shape(mesh):
-    """Read the selected meshed shape in world coordinates, including parent placements."""
-    from femmesh.meshtools import sub_shape_at_global_placement
-
-    link = getattr(mesh, "Shape", None) or getattr(mesh, "Part", None)
-    if hasattr(link, "getGlobalPlacement"):
-        return sub_shape_at_global_placement(link, "")
-    return link
 
 
 def extract_material(doc):
