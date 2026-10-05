@@ -155,7 +155,8 @@ is performed because position and orientation can be part of the requested edit.
   error. This finite sampling check is not an exact geometric equivalence proof.
 - Failed optional splitter removal or tessellation does not discard otherwise
   valid geometry: original-body matching falls back to CAD intersections.
-- The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit.
+- The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit,
+  which defaults to 1,800 seconds (30 minutes) per adapter process.
   Exceeding it terminates the worker process group and raises an extraction error;
   a timeout is not treated as invalid candidate geometry.
 - A failed diff raises an evaluation error rather than an empty change set.

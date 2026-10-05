@@ -278,8 +278,10 @@ The equivalent CLI is:
 
 ```bash
 freecad-validator fem-score source.step reference.FCStd candidate.FCStd \
-  --max-node-count 26000 --timeout 900 --json
+  --max-node-count 26000 --timeout 1800 --json
 ```
+
+The default timeout is 1,800 seconds per FreeCAD/CalculiX adapter process.
 
 Use `--require-boolean` only for tasks whose metadata explicitly requires a
 Boolean operation, and `--require-preprocessing` only when preprocessing is an

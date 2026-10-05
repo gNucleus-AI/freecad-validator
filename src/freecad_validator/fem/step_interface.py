@@ -73,7 +73,7 @@ class RuntimeEnvironmentError(ExtractionError):
     """The validator runtime is missing or misconfigured."""
 
 
-DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 900.0
+DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 1800.0
 DIAGNOSTIC_TAIL_CHARACTERS = 16_000
 
 

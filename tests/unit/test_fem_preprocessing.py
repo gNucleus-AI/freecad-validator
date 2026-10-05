@@ -91,7 +91,7 @@ def test_existing_flag_alone_enables_automatic_multiplier(tmp_path):
         str(Path("reference.FCStd").resolve()),
         str(Path("candidate.FCStd").resolve()),
     ]
-    assert extract.call_args.kwargs["timeout_seconds"] > 0
+    assert extract.call_args.kwargs["timeout_seconds"] == 1800.0
 
 
 def test_invalid_candidate_geometry_is_zero_with_reason(tmp_path):
