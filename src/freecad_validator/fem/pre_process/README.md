@@ -79,6 +79,12 @@ against original/reference bodies; added material needs unambiguous ownership.
 Fragments are not independently counted as extra original bodies. A fallback
 runs the same geometry comparison; it never grants an assumed score of 1.
 
+A saved input can itself be a fused solid. If it spans multiple independent
+original/reference bodies, partition it before one-to-one assignment. Otherwise
+the remaining originals would be incorrectly counted as deleted. Contained
+fittings alone do not establish fusion, and the recovered bodies still undergo
+the normal geometry comparison, including penalties for missing or extra edits.
+
 Explicitly linked inputs that contradict the actual analysis still cause a
 candidate zero or reference evaluation error. Unusable optional detached history
 is ignored in favor of the actual analysis geometry. Unresolvable ownership,
@@ -141,9 +147,16 @@ is performed because position and orientation can be part of the requested edit.
   elsewhere in the document or regroup the actual meshed fragments when history
   is unavailable. Ambiguous ownership remains an evaluation error. These checks
   do not replace FEM/Boolean checks.
+- Saved-input consistency uses the existing Halton sampler and point-in-solid
+  queries in both directions, with logical OR for overlapping solids. It does
+  not cut, fuse, or rebuild verification geometry. Sampling is per solid (8,192
+  probes, extended up to 65,536 if fewer than 64 land inside); an uncovered probe
+  rejects the history, and insufficient occupied probes remain an evaluation
+  error. This finite sampling check is not an exact geometric equivalence proof.
 - Failed optional splitter removal or tessellation does not discard otherwise
   valid geometry: original-body matching falls back to CAD intersections.
-- The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit.
+- The preprocessing adapter uses the FEM API's existing `timeout_seconds` limit,
+  which defaults to 1,800 seconds (30 minutes) per adapter process.
   Exceeding it terminates the worker process group and raises an extraction error;
   a timeout is not treated as invalid candidate geometry.
 - A failed diff raises an evaluation error rather than an empty change set.

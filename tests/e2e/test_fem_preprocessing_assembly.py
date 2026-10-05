@@ -414,6 +414,45 @@ def save_detached_inputs(path, clean, raw=()):
         FreeCAD.closeDocument(doc.Name)
 
 
+@pytest.mark.parametrize("storage", ["detached", "linked"])
+@pytest.mark.parametrize("edit", ["correct", "unprocessed", "extra_cut"])
+def test_saved_fused_input_is_scored_by_original_body(tmp_path, storage, edit):
+    first = Part.makeBox(10, 10, 10)
+    second = Part.makeBox(1, 10, 10, FreeCAD.Vector(10, 0, 0))
+    unchanged = Part.makeBox(3, 3, 3, FreeCAD.Vector(30, 0, 0))
+    raw_first = first.cut(Part.makeCylinder(1, 10, FreeCAD.Vector(3, 3, 0)))
+    raw = tmp_path / "raw.step"
+    Part.makeCompound([raw_first, second, unchanged]).exportStep(str(raw))
+    ref = tmp_path / "reference.FCStd"
+    save_analysis(ref, [first.fuse(second), unchanged], history=[first, second, unchanged])
+    fused = (raw_first if edit == "unprocessed" else first).fuse(second).removeSplitter()
+    if edit == "extra_cut":
+        fused = fused.cut(Part.makeCylinder(0.3, 10, FreeCAD.Vector(10.5, 3, 0)))
+    candidate = tmp_path / "candidate.FCStd"
+    if storage == "detached":
+        save_detached_inputs(candidate, [fused, unchanged])
+    else:
+        save_analysis(candidate, [fused, unchanged])
+    result = score_assembly(
+        raw, ref, candidate, PreProcessScorer(DiffConfig(region_sample_count=256))
+    )
+    assert result["score"] == (1 if edit == "correct" else 0)
+    assert result["reference_changed_body_count"] == 1
+    assert result["extra_changed_body_count"] == (1 if edit == "extra_cut" else 0)
+    assert all(result["correspondence"]["candidate"])
+
+
+def test_contained_fitting_does_not_turn_a_saved_body_into_a_fusion():
+    housing = BodyGeometry(Part.makeBox(10, 10, 10), "housing")
+    fitting = BodyGeometry(Part.makeBox(1, 1, 1, FreeCAD.Vector(2, 2, 2)), "fitting")
+    rebuilt, extras, mapping = regroup_bodies(
+        [housing, fitting], [housing], False, [housing, fitting]
+    )
+    assert not extras
+    assert mapping == [[0], []]
+    assert rebuilt[1] is None
+
+
 @pytest.mark.parametrize("with_raw_history", [False, True])
 def test_legacy_detached_clean_inputs_score_without_rewriting_file(
     assembly_case, tmp_path, with_raw_history
@@ -722,9 +761,41 @@ def test_decoy_inputs_produce_zero_worker_reward(assembly_case, tmp_path, monkey
     assert report["overall_score"] == 0
 
 
+@pytest.mark.parametrize("missing_material", [False, True])
+def test_saved_input_occupancy_check_does_not_build_geometry(monkeypatch, missing_material):
+    analyzed = Part.makeBox(10, 10, 10)
+    prepared = Part.makeBox(5 if missing_material else 10, 10, 10)
+    bodies = [BodyGeometry(prepared, "prepared")]
+    monkeypatch.setattr(
+        assembly_module.Part,
+        "makeCompound",
+        Mock(side_effect=AssertionError("Must not build verification geometry")),
+    )
+    if missing_material:
+        with pytest.raises(EvaluationError, match="do not match"):
+            assembly_module.verify_clean_inputs(bodies, analyzed, "reference")
+    else:
+        assembly_module.verify_clean_inputs(bodies, analyzed, "reference")
+
+
+@pytest.mark.parametrize("extra_width", [0.0, 0.25])
+def test_sampled_input_union_preserves_extra_material_detection(extra_width):
+    first = Part.makeBox(3, 2, 2)
+    second = Part.makeBox(3, 2, 2, FreeCAD.Vector(2, 0, 0))
+    actual = Part.makeBox(5 + extra_width, 2, 2)
+    bodies = [BodyGeometry(first, "first"), BodyGeometry(second, "overlapping")]
+    analyzed = [BodyGeometry(actual, "analysis")]
+    assert assembly_module.history_matches_analysis(bodies, analyzed) == (extra_width == 0)
+    # Overlap must use OR occupancy; a missing input still leaves exposed material.
+    assert not assembly_module.history_matches_analysis(bodies[:1], analyzed)
+
+
 def test_input_verification_failure_does_not_become_candidate_zero(monkeypatch):
-    body = BodyGeometry(Mock(), "prepared")
-    body.mesh = None
-    body.shape.cut.side_effect = Part.OCCError("injected verification failure")
+    body = BodyGeometry(Part.makeBox(1, 1, 1), "prepared")
+    monkeypatch.setattr(
+        assembly_module,
+        "_inside",
+        Mock(side_effect=Part.OCCError("injected verification failure")),
+    )
     with pytest.raises(BodyCorrespondenceError, match="injected verification failure"):
         assembly_module.verify_clean_inputs([body], Part.makeBox(1, 1, 1), "candidate")

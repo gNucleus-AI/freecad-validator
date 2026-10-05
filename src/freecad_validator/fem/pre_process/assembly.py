@@ -27,9 +27,17 @@ from freecad_validator.fem.pre_process.errors import (
     EvaluationError,
 )
 from freecad_validator.fem.pre_process.geometry import export_geometry, refine_geometry
+from freecad_validator.fem.pre_process.geometry_compare.brep_diff.geometry_ops import (
+    linear_tolerance,
+)
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.methods.mesh_boolean import (
     tessellate_shape,
     to_manifold,
+)
+from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import DiffConfig
+from freecad_validator.fem.pre_process.geometry_compare.scorers.region_edit_overlap_scorer import (
+    _halton_points,
+    _inside,
 )
 from freecad_validator.fem.pre_process.policy import aggregate_body_scores, score_body_edit
 
@@ -138,123 +146,66 @@ def same_solid_geometry(left, right):
     return left.cut(right).Volume + right.cut(left).Volume <= tolerance
 
 
-def mesh_union(bodies):
-    if any(body.mesh is None for body in bodies):
-        return None
-    union = bodies[0].mesh
-    for body in bodies[1:]:
-        union = union + body.mesh
-    return union
+def sampled_material_is_covered(sources, targets):
+    """Check one direction of union occupancy using the existing region sampler.
+
+    Sample each solid separately so small parts are not lost in assembly-wide
+    probes. Union occupancy is logical OR, including overlapping input solids;
+    no CAD/mesh Boolean or geometric reconstruction is performed here.
+    Require at least 64 occupied probes and cap sampling at 65,536.
+    Insufficient coverage is an error, never a match.
+    """
+    config = DiffConfig()
+    target_boxes = [(body.shape, body.shape.BoundBox) for body in targets]
+    for body in sources:
+        box = body.shape.BoundBox
+        bounds = ((box.XMin, box.YMin, box.ZMin), (box.XMax, box.YMax, box.ZMax))
+        tolerance = linear_tolerance(config, max(box.DiagonalLength, 1.0))
+        nearby = [(shape, other) for shape, other in target_boxes if box.intersect(other)]
+        occupied = 0
+        previous_count = 0
+        count = config.region_sample_count
+        while True:
+            for point in _halton_points(count, bounds)[previous_count:]:
+                if not _inside(body.shape, point, tolerance):
+                    continue
+                occupied += 1
+                x, y, z = point
+                if not any(
+                    other.XMin - tolerance <= x <= other.XMax + tolerance
+                    and other.YMin - tolerance <= y <= other.YMax + tolerance
+                    and other.ZMin - tolerance <= z <= other.ZMax + tolerance
+                    and _inside(shape, point, tolerance)
+                    for shape, other in nearby
+                ):
+                    logging.info("Saved-input occupancy mismatch in %s at %s", body.source, point)
+                    return False
+            if occupied >= 64:
+                break
+            if count >= 65536:
+                raise ValueError(f"Insufficient occupied probes for {body.source}: {occupied}")
+            previous_count, count = count, min(count * 4, 65536)
+    return bool(sources and targets)
 
 
 def history_matches_analysis(inputs, analyzed):
-    left, right = mesh_union(inputs), mesh_union(analyzed)
-    if left is None or right is None:
-        return False
-    difference = (left - right).volume() + (right - left).volume()
-    return difference <= 1e-5 * max(left.volume(), right.volume())
-
-
-def shape_geometry_signature(shape):
-    """Geometric descriptors for comparing two executions of the same Boolean.
-
-    This only verifies provenance; none of these counts contributes to grading.
-    Include individual surface locations and vertices, not just total volume.
-    """
-    faces = sorted(
-        ((type(face.Surface).__name__, face.Area, *face.CenterOfMass) for face in shape.Faces),
-        key=lambda row: (row[0], *(round(value, 4) for value in row[1:])),
-    )
-    vertices = sorted(
-        (tuple(vertex.Point) for vertex in shape.Vertexes),
-        key=lambda row: tuple(round(value, 4) for value in row),
-    )
-    return faces, vertices
-
-
-def regenerated_history_matches(inputs, analyzed, tolerance, *, union=False):
-    """Verify the Boolean from its input solids when saved facets are unusable.
-
-    Recompute detached OCC shapes only; never execute a candidate feature's Proxy
-    or recompute/save its document. Thus stale or decoy input parts cannot replace
-    the geometry actually linked to the FEM mesh.
-    """
-    shapes = [body.shape for body in inputs]
-    rebuilt = shapes[0]
-    if union:
-        actual = Part.makeCompound([body.shape for body in analyzed])
-        limit = max(1e-5, 1e-8 * actual.Volume)
-        # Compare occupied material directly. An untrusted saved fuzzy tolerance
-        # must not let altered geometry masquerade as the claimed input union.
-        missing = sum(shape.cut(actual).Volume for shape in shapes)
-        extra = actual.cut(Part.makeCompound(shapes)).Volume
-        return missing + extra <= limit
-    if len(shapes) > 1:
-        rebuilt, _ = shapes[0].generalFuse(shapes[1:], tolerance)
-    # Match the detached per-solid representation used by solid_bodies; shared
-    # interfaces must have the same multiplicity on both sides of this check.
-    rebuilt = Part.makeCompound([solid.copy() for solid in rebuilt.Solids])
-    actual = Part.makeCompound([body.shape for body in analyzed])
-    if not math.isclose(rebuilt.Volume, actual.Volume, rel_tol=1e-8, abs_tol=1e-5):
-        return False
-    left_faces, left_vertices = shape_geometry_signature(rebuilt)
-    right_faces, right_vertices = shape_geometry_signature(actual)
-    if len(left_faces) != len(right_faces) or len(left_vertices) != len(right_vertices):
-        return False
-    if [face[0] for face in left_faces] != [face[0] for face in right_faces]:
-        return False
-    return bool(
-        np.allclose(
-            [face[1:] for face in left_faces],
-            [face[1:] for face in right_faces],
-            rtol=1e-8,
-            atol=1e-5,
-        )
-        and np.allclose(left_vertices, right_vertices, rtol=1e-8, atol=1e-5)
-    )
-
-
-def mesh_inputs_match_analysis(bodies, analyzed):
-    """Independently check material when OCC differences are inconclusive.
-
-    Some valid coincident surfaces produce inconsistent CAD Boolean results.
-    Check each input and analysis solid separately so a large assembly cannot
-    hide a missing small body in an assembly-wide relative tolerance.
-    """
-    analysis_bodies = [BodyGeometry(solid.copy(), "analysis") for solid in analyzed.Solids]
-    if any(body.mesh is None for body in [*bodies, *analysis_bodies]):
-        return False
-    prepared = bodies[0].mesh
-    for body in bodies[1:]:
-        prepared = prepared + body.mesh
-    actual = analysis_bodies[0].mesh
-    for body in analysis_bodies[1:]:
-        actual = actual + body.mesh
-    return all(
-        (body.mesh - actual).volume() <= max(1e-5, body.shape.Volume * 1e-8) for body in bodies
-    ) and all(
-        (body.mesh - prepared).volume() <= max(1e-5, body.shape.Volume * 1e-8)
-        for body in analysis_bodies
+    """Bidirectional sampled occupancy; face splits and seams are irrelevant."""
+    return sampled_material_is_covered(inputs, analyzed) and sampled_material_is_covered(
+        analyzed, inputs
     )
 
 
 def verify_clean_inputs(bodies, analyzed, role):
     """Check occupied material only; analyzed regions never become scored bodies."""
     try:
-        mismatch = any(
-            body.shape.cut(analyzed).Volume > max(1e-5, body.shape.Volume * 1e-8) for body in bodies
-        )
-        if not mismatch:
-            prepared = Part.makeCompound([body.shape for body in bodies])
-            mismatch = analyzed.cut(prepared).Volume > max(1e-5, analyzed.Volume * 1e-8)
-    except Part.OCCError as exc:
-        if mesh_inputs_match_analysis(bodies, analyzed):
-            return
+        actual = [BodyGeometry(solid, "analysis") for solid in analyzed.Solids]
+        mismatch = not history_matches_analysis(bodies, actual)
+    except (Part.OCCError, ValueError) as exc:
         raise BodyCorrespondenceError(
             f"Cannot verify saved clean inputs against analysis geometry: {exc}",
             role,
         ) from exc
-    if mismatch and not mesh_inputs_match_analysis(bodies, analyzed):
+    if mismatch:
         error_type = CandidateGeometryError if role == "candidate" else EvaluationError
         raise error_type("Saved clean inputs do not match the actual analysis geometry")
 
@@ -390,15 +341,7 @@ def read_clean_bodies(path, *, candidate=False, raw=None):
                     for obj in history
                     for body in solid_bodies(world_shape(obj), f"{path}:{obj.Name}", error_type)
                 ]
-                tolerance = getattr(feature, "Tolerance", 0.0)
-                tolerance = float(getattr(tolerance, "Value", tolerance))
-                if history_matches_analysis(bodies, analyzed_bodies) or regenerated_history_matches(
-                    bodies,
-                    analyzed_bodies,
-                    tolerance,
-                    union=str(getattr(feature, "Mode", "")) == "Union"
-                    or feature.TypeId in {"Part::MultiFuse", "Part::Fuse"},
-                ):
+                if history_matches_analysis(bodies, analyzed_bodies):
                     return bodies, False
             # Single-part preprocessing may store the prepared solid directly
             # on the mesh feature while retaining the unmodified STEP import.
@@ -537,6 +480,31 @@ def regroup_bodies(raw, parts, fragmented, reference=None):
         raise BodyCorrespondenceError(str(exc), role) from exc
 
 
+def fused_input_owners(anchors, overlaps):
+    """Recognize a saved solid spanning multiple independent original bodies.
+
+    Saved input links establish provenance, not a one-input/one-original mapping.
+    Contained fittings do not establish fusion: each owner must retain substantial
+    material outside each other covered anchor.
+    """
+    owners = [
+        i
+        for i, anchor in enumerate(anchors)
+        if anchor is not None and overlaps[i] > 0.8 * anchor.shape.Volume
+    ]
+    if len(owners) < 2:
+        return []
+    covered = [anchors[i] for i in owners]
+    shared = overlap_matrix(covered, covered)
+    np.fill_diagonal(shared, 0.0)
+    independent = [
+        i
+        for column, i in enumerate(owners)
+        if np.max(shared[:, column]) < 0.8 * anchors[i].shape.Volume
+    ]
+    return independent if len(independent) > 1 else []
+
+
 def _regroup_bodies(raw, parts, fragmented, reference=None):
     """Return one shape per original body, extra solids, and the ownership map.
 
@@ -545,8 +513,11 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
     Reference geometry also anchors candidate correspondence after requested moves.
     """
     overlaps = overlap_matrix(raw, parts)
+    anchors = raw if reference is None else reference
+    anchor_overlaps = overlaps
     if reference is not None:
-        overlaps = np.maximum(overlaps, overlap_matrix(reference, parts))
+        anchor_overlaps = overlap_matrix(reference, parts)
+        overlaps = np.maximum(overlaps, anchor_overlaps)
     volumes = np.array([body.shape.Volume for body in parts])
     raw_volumes = np.array([body.shape.Volume for body in raw])
     if reference is not None:
@@ -602,9 +573,23 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
                 contributions[i].append(part.shape)
             assigned.add(j)
     elif parts:
+        # A saved "input" may itself be a baked fusion. Recover its owners before
+        # one-to-one matching, which would otherwise mark the other parts deleted.
+        for j, part in enumerate(parts):
+            owners = fused_input_owners(anchors, anchor_overlaps[:, j])
+            if not owners:
+                continue
+            pieces = partition_fused_part(part, owners, anchors)
+            for i, shape in pieces.items():
+                ownership[i].append(j)
+                contributions[i].append(shape)
+            assigned.add(j)
         quality = overlaps / np.maximum(np.minimum(raw_volumes[:, None], volumes[None, :]), 1e-12)
-        rows, columns = linear_sum_assignment(-quality)
-        for i, j in zip(rows, columns, strict=False):
+        available_rows = [i for i, indices in enumerate(ownership) if not indices]
+        available_columns = [j for j in range(len(parts)) if j not in assigned]
+        rows, columns = linear_sum_assignment(-quality[np.ix_(available_rows, available_columns)])
+        for row, column in zip(rows, columns, strict=False):
+            i, j = available_rows[row], available_columns[column]
             if quality[i, j] >= 0.1:
                 ownership[i].append(int(j))
                 contributions[i].append(parts[j].shape)
