@@ -45,7 +45,9 @@ class BodyGeometry:
         # This coarse mesh finds correspondence only; body scoring uses its own
         # established tolerances and changed-region samples, not these overlaps.
         try:
-            mesh = to_manifold(*tessellate_shape(self.shape.removeSplitter(), 0.05))
+            # OCCT refinement can mutate shared input surfaces even when the
+            # returned shape is valid. Preserve the body used for later scoring.
+            mesh = to_manifold(*tessellate_shape(self.shape.copy().removeSplitter(), 0.05))
         except Part.OCCError:
             # Refinement/tessellation can fail on valid saved Boolean regions.
             # Correspondence can still use exact CAD intersections below.

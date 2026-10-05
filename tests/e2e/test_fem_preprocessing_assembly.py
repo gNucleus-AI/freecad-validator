@@ -335,6 +335,7 @@ def test_failed_refinement_uses_cad_overlap_without_discarding_valid_geometry():
     shape = Part.makeBox(10, 10, 10)
     failing = Mock(wraps=shape)
     failing.BoundBox = shape.BoundBox
+    failing.copy.return_value = failing
     failing.removeSplitter.side_effect = Part.OCCError("Removing splitter failed")
     body = BodyGeometry(failing, "valid but unrefinable")
     assert body.mesh is None
