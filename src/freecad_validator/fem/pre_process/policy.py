@@ -32,13 +32,15 @@ def score_body_edit(
             **geometry.details,
             "reference_changed": True,
             "extra_change": False,
-            "geometry_score": geometry.score,
+            "geometry_score": (
+                None if "geometry_score_upper_bound" in geometry.details else geometry.score
+            ),
         },
     )
 
 
 def aggregate_body_scores(results: dict[str, ScoreResult | None]) -> dict:
-    """One entry per original body, before Boolean Fragments; skipped entries add nothing."""
+    """One entry per original or required new body; skipped entries add nothing."""
     scored = [result for result in results.values() if result is not None]
     changed = [result for result in scored if result.details["reference_changed"]]
     correct = sum(result.score == 1 for result in changed)

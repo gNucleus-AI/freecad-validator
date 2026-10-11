@@ -233,7 +233,21 @@ The FEM API compares a candidate solved FCStd with an engineer-generated solved
 reference on a source STEP. It extracts the saved analysis, replays the
 candidate solve with CalculiX, verifies the stored displacement and stress
 fields, and returns a deterministic 0–100 report with validity gates and
-engineering diagnostics.
+engineering diagnostics. The saved-reference path uses accuracy (35%), node budget
+(25%), setup agreement (20%), physical validity (15%) and numerical reliability
+(5%). Mesh quality receives no points, but invalid-element evidence still gates
+validity. The separately exported generic `score_result` API retains its weights.
+
+Setup agreement compares the reference analysis geometry, materials, restraints,
+loads and, when present, contacts using continuous one-to-one matching. It reads
+only active members of the solved analysis, including Python-backed self-weight
+constraints. `required_setup_present` reports missing required load types separately
+from `setup_correct`, which indicates perfect agreement. These flags do not define
+a public binary reward. Invalid references and evaluator failures raise errors;
+measured candidate failures return a scored report.
+
+Replay uses the saved mesh and reads fresh CalculiX fields without recomputing CAD,
+remeshing or importing result objects into the evaluated document.
 
 Mesh-budget scoring uses the saved solve's node count. A positive count at or below
 the inclusive task cap receives full mesh-budget credit; exceeding the cap makes
@@ -283,26 +297,25 @@ freecad-validator fem-score source.step reference.FCStd candidate.FCStd \
 
 The default timeout is 1,800 seconds per FreeCAD/CalculiX adapter process.
 
-Use `--require-boolean` only for tasks whose metadata explicitly requires a
-Boolean operation, and `--require-preprocessing` only when preprocessing is an
-explicit task requirement. Neither requirement is inferred from instruction
-text. Intermediate extraction JSON is temporary by default; pass
+Use `--require-preprocessing` when preprocessing is an explicit task requirement.
+The existing `--require-boolean` argument remains accepted for compatibility;
+Boolean region/container agreement is now part of continuous setup scoring, not a
+separate hard gate. Intermediate extraction JSON is temporary by default; pass
 `--extract-dir` to retain it.
 
-For preprocessing tasks, install `gnucleus-freecad-validator[preprocess]` in the
-Python environment used by FreeCAD. The flag also enables automatic comparison
-of each original body before Boolean Fragments: the final score is the existing
-FEM score multiplied by preprocessing geometry credit. A required edit earns one
-point when geometric similarity exceeds 0.95; extra edits subtract points, and
-bodies unchanged by both the reference and candidate are skipped. Topology-only
-differences receive no geometry penalty. No manual body mapping is required.
-See [preprocessing scoring](src/freecad_validator/fem/pre_process/README.md) for
-the formula and correspondence limits.
+For preprocessing, install `gnucleus-freecad-validator[preprocess]` in a compatible
+Python environment. The geometry worker discovers a Python with OCP; it can use a
+separate interpreter when FreeCAD's embedded Python lacks those bindings. In a
+conda FreeCAD environment, use conda's compatible OCP/VTK packages instead of
+installing the pip binary stack over them.
 
-The preprocessing gate treats geometry as unchanged only when volume, surface
-area, and topology all match. Face or region partitions can therefore satisfy
-preprocessing even when volume and area are preserved. Region comparisons use
-one-to-one matching within tolerance and do not depend on region ordering.
+The final score is the gated FEM score multiplied by preprocessing geometry
+credit. Required edits and additions earn one point when similarity exceeds 0.95;
+extra edits subtract points. Both documents must preserve verified independent
+clean bodies before Boolean operations. Missing clean-body evidence receives zero
+geometry credit; query/runtime failures remain evaluation errors. Comparison uses
+saved geometry, without Boolean reconstruction, refinement, CAD exports or
+recomputation. See [preprocessing scoring](src/freecad_validator/fem/pre_process/README.md).
 
 Geometry extraction treats a shape and the same shape inside one-child Compound
 wrappers as equivalent. Compounds with multiple children retain their container

@@ -3,7 +3,8 @@
 Runs under FreeCAD's interpreter (`freecadcmd`). Opens an FCStd, selects the
 representative solid, and emits a `BrepDocument` of frozen per-subshape records
 (geometry type, measure, centroid, bbox, orientation, analytic scalars, sampled
-points, and face/edge/vertex adjacency). No FreeCAD object escapes this module.
+points, and face/edge/vertex adjacency). The document retains its read-only shape
+for spatial queries without another file export or import.
 """
 
 from __future__ import annotations
@@ -71,13 +72,14 @@ def document_from_shape(
     edges = tuple(shape.Edges)
     vertices = tuple(shape.Vertexes)
     face_adjacency, edge_adjacency, vertex_adjacency = _build_adjacency(faces, edges, vertices)
+    box = shape.optimalBoundingBox(False, False)
     return BrepDocument(
         path=path,
         object_name=object_name,
         freecad_version=freecad_version,
         occt_version=occt_version,
-        bbox_min=_bbox_min(shape),
-        bbox_max=_bbox_max(shape),
+        bbox_min=(box.XMin, box.YMin, box.ZMin),
+        bbox_max=(box.XMax, box.YMax, box.ZMax),
         volume=float(getattr(shape, "Volume", 0.0) or 0.0),
         area=float(getattr(shape, "Area", 0.0) or 0.0),
         faces=tuple(
@@ -93,6 +95,7 @@ def document_from_shape(
             for index, vertex in enumerate(vertices, start=1)
         ),
         gate_reason=gate_reason,
+        _shape=shape,
     )
 
 
@@ -143,7 +146,7 @@ def open_fcstd_part(fcstd_path: Path, config: DiffConfig) -> LoadedPart:
             gate_reason=None,
             config=config,
         )
-        return LoadedPart(document=document, shape=shape.copy())
+        return LoadedPart(document=document, shape=shape)
     finally:
         FreeCAD.closeDocument(doc.Name)
 

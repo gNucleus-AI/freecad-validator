@@ -1,38 +1,14 @@
-"""Extract a FreeCAD FEM result document (.FCStd) into the scorer's JSON schema.
-
-MUST be run under a FEM-enabled FreeCAD 1.1.0 interpreter compatible with the
-files being compared. For example:
-
-    freecadcmd fcstd.py <input.FCStd> <output.json>
-
-It reads the saved result object (the same object FreeCAD_FEM_Workflow.py writes
-its summary from) plus the material, constraints, solver and mesh, and writes a
-dict that maps onto ``freecad_validator.fem.schema``. The JSON is
-written to a FILE, so FreeCAD's banner/warning noise on stdout never corrupts it.
-
-Notes
------
-* freecadcmd does not set __name__ == "__main__" and passes script args through
-  sys.argv, so the entry point is called unconditionally at the bottom and args
-  are discovered by extension (.FCStd / .json) rather than by position.
-* An .FCStd carries geometry, material, BCs/loads, mesh and nodal result fields,
-  but those arrays alone do not prove a solver ran. Candidate extraction uses
-  ``verify-solve`` to rerun CalculiX from the saved analysis and compare the
-  replayed fields before setting solver/artifact evidence. Reference extraction
-  stays read-only and never vouches for candidate convergence.
-"""
+"""Extract and verify saved static analyses under FreeCAD's Python."""
 
 import ctypes
-import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
-import zipfile
 from pathlib import Path
+from types import ModuleType
 
 
 def preload_openmp_runtime():
@@ -48,58 +24,30 @@ def preload_openmp_runtime():
 
 preload_openmp_runtime()
 
+# Locate the installed package without loading host-interpreter extensions.
+package_root = Path(__file__).resolve().parents[2]
+for name, directory in (
+    ("freecad_validator", package_root),
+    ("freecad_validator.fem", package_root / "fem"),
+):
+    if name not in sys.modules:
+        package = ModuleType(name)
+        package.__path__ = [str(directory)]
+        sys.modules[name] = package
+
 import FreeCAD  # noqa: E402
-from femtools.ccxtools import FemToolsCcx  # noqa: E402
-from FreeCAD import Units  # noqa: E402
 
-# FreeCAD may embed a different Python minor version from the interpreter that
-# installed this wheel. Loading this pure-Python module by file path avoids
-# importing the package root and any host-interpreter extension modules.
-replay_path = Path(__file__).resolve().parents[1] / "replay_compare.py"
-replay_spec = importlib.util.spec_from_file_location(
-    "_freecad_validator_replay_compare", replay_path
+from freecad_validator.fem.fcstd_archive import assert_safe_fcstd  # noqa: E402
+from freecad_validator.fem.freecad_io import (  # noqa: E402
+    extract_material_body_counts as extract_material_body_counts,
 )
-if replay_spec is None or replay_spec.loader is None:
-    raise ImportError(f"cannot load replay comparison module from {replay_path}")
-replay_compare = importlib.util.module_from_spec(replay_spec)
-replay_spec.loader.exec_module(replay_compare)
-
-REPLAY_REL_TOL = replay_compare.REPLAY_REL_TOL
-REPLAY_SCALAR_FIELDS = replay_compare.REPLAY_SCALAR_FIELDS
-compare_result_snapshots = replay_compare.compare_result_snapshots
-select_scored_results = replay_compare.select_scored_results
-
-material_path = Path(__file__).resolve().parents[1] / "material_counts.py"
-material_spec = importlib.util.spec_from_file_location(
-    "_freecad_validator_material_counts", material_path
+from freecad_validator.fem.replay_compare import select_scored_results  # noqa: E402
+from freecad_validator.fem.static_extraction import (  # noqa: E402
+    UnsupportedSetupError,
+    _extract_document,
+    _result_values,
 )
-if material_spec is None or material_spec.loader is None:
-    raise ImportError(f"cannot load material count module from {material_path}")
-material_counts = importlib.util.module_from_spec(material_spec)
-material_spec.loader.exec_module(material_counts)
-grouped_material_counts = material_counts.grouped_material_counts
-material_signature = material_counts.material_signature
-
-geometry_path = Path(__file__).resolve().parents[1] / "geometry.py"
-geometry_spec = importlib.util.spec_from_file_location("_freecad_validator_geometry", geometry_path)
-if geometry_spec is None or geometry_spec.loader is None:
-    raise ImportError(f"cannot load geometry module from {geometry_path}")
-geometry = importlib.util.module_from_spec(geometry_spec)
-geometry_spec.loader.exec_module(geometry)
-geometry_facts = geometry.geometry_facts
-
-
-context_path = Path(__file__).resolve().parents[1] / "analysis_context.py"
-context_spec = importlib.util.spec_from_file_location(
-    "_freecad_validator_analysis_context", context_path
-)
-if context_spec is None or context_spec.loader is None:
-    raise ImportError(f"cannot load analysis context module from {context_path}")
-analysis_context = importlib.util.module_from_spec(context_spec)
-context_spec.loader.exec_module(analysis_context)
-_is_result_object = analysis_context._is_result_object
-find_replay_context = analysis_context.find_replay_context
-linked_mesh_shape = analysis_context.linked_mesh_shape
+from freecad_validator.fem.static_replay import _replay  # noqa: E402
 
 
 def runtime_info(require_calculix=False):
@@ -146,588 +94,53 @@ def runtime_info(require_calculix=False):
     return info
 
 
-def qty(value, unit):
-    """Convert a FreeCAD quantity/string/number to a float in `unit`."""
-    try:
-        return float(Units.Quantity(value).getValueAs(unit))
-    except (ValueError, TypeError):
-        return float(value)
-
-
-def find_result(doc):
-    for o in doc.Objects:
-        if _is_result_object(o):
-            return o
-    return None
-
-
-def extract_result_values(res):
-    results = {}
-    disp = list(getattr(res, "DisplacementLengths", []) or [])
-    vm = list(getattr(res, "vonMises", []) or [])
-    shear = list(getattr(res, "MaxShear", []) or [])
-    temp = list(getattr(res, "Temperature", []) or [])
-    if disp:
-        results["max_displacement_mm"] = max(disp)
-        results["mean_displacement_mm"] = sum(disp) / len(disp)
-    if vm:
-        results["max_von_mises_MPa"] = max(vm)
-        results["mean_von_mises_MPa"] = sum(vm) / len(vm)
-    if shear:
-        results["max_shear_MPa"] = max(shear)
-    if temp:
-        results["max_temperature_C"] = max(temp)
-    return results
-
-
-def snapshot_result_fields(res):
-    fields = {}
-    for name in REPLAY_SCALAR_FIELDS:
-        values = list(getattr(res, name, []) or [])
-        if values:
-            fields[name] = [float(value) for value in values]
-
-    vectors = list(getattr(res, "DisplacementVectors", []) or [])
-    if vectors:
-        fields["DisplacementVectors"] = [
-            (float(value.x), float(value.y), float(value.z)) for value in vectors
-        ]
-
-    return {
-        "node_numbers": [int(node) for node in list(getattr(res, "NodeNumbers", []) or [])],
-        "fields": fields,
-    }
-
-
-def verify_solver_replay(doc, stored_result, analysis_type, output_path):
-    stored_snapshot = snapshot_result_fields(stored_result)
-    work_parent = os.path.dirname(os.path.abspath(output_path))
-    work_dir = tempfile.mkdtemp(prefix="fem-replay-", dir=work_parent)
-    os.chmod(work_dir, 0o700)
-    try:
-        analysis, solver, source_mesh = find_replay_context(
-            doc, stored_result, len(stored_snapshot["node_numbers"])
-        )
-        solver.WorkingDir = work_dir
-        fea = FemToolsCcx(analysis, solver)
-        fea.update_objects()
-        fea.setup_working_dir(work_dir, create=True)
-        fea.setup_ccx()
-        if not os.path.isfile(fea.ccx_binary):
-            raise FileNotFoundError(f"CalculiX not found: {fea.ccx_binary}")
-        prerequisite_error = fea.check_prerequisites()
-        if prerequisite_error:
-            raise RuntimeError(f"CalculiX replay prerequisites failed: {prerequisite_error}")
-
-        # Clear every existing result before re-solving. FreeCAD's helper removes
-        # analysis-group members, while documents can also contain detached result
-        # objects. Removing both makes the freshly loaded replay result unambiguous.
-        fea.purge_results()
-        for stale in [obj for obj in doc.Objects if obj.TypeId == "Fem::FemResultObjectPython"]:
-            doc.removeObject(stale.Name)
-        doc.recompute()
-        fea.write_inp_file()
-        return_code = fea.ccx_run()
-        if return_code not in (None, 0):
-            raise RuntimeError(f"CalculiX replay failed with exit code {return_code}")
-        fea.load_results()
-        doc.recompute()
-
-        replay_results = [obj for obj in doc.Objects if _is_result_object(obj)]
-        if not replay_results:
-            raise RuntimeError("CalculiX replay produced no loaded FEM result")
-        replayed_result = max(replay_results, key=lambda obj: len(obj.NodeNumbers))
-        replayed_snapshot = snapshot_result_fields(replayed_result)
-        verification = compare_result_snapshots(stored_snapshot, replayed_snapshot, analysis_type)
-        verification.update(
-            {
-                "analysis": analysis.Name,
-                "solver": solver.Name,
-                "mesh": source_mesh.Name,
-                "node_count": len(replayed_snapshot["node_numbers"]),
-            }
-        )
-        return verification, extract_result_values(replayed_result)
-    except Exception as exc:
-        return {
-            "passed": False,
-            "status": "solve_failed",
-            "relative_tolerance": REPLAY_REL_TOL,
-            "failures": [str(exc)],
-            "field_comparisons": {},
-        }, None
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
-
-
-def material_values(obj):
-    material = dict(obj.Material)
-    out = {"name": material.get("Name", "")}
-    for source, target, unit in (
-        ("YoungsModulus", "E_MPa", "MPa"),
-        ("Density", "rho_kg_m3", "kg/m^3"),
-    ):
-        if material.get(source):
-            out[target] = qty(material[source], unit)
-    if material.get("PoissonRatio"):
-        out["nu"] = float(material["PoissonRatio"])
-    return out
-
-
-def _add_distinct_solids(buckets, solids):
-    """Deduplicate local topology references; no geometric/body correspondence."""
-    for solid in solids:
-        bucket = buckets.setdefault(solid.hashCode(), [])
-        if not any(solid.isSame(previous) for previous in bucket):
-            bucket.append(solid)
-
-
-def extract_material_body_counts(objects, total_solids):
-    """Count referenced solids per parameter card in the selected analysis.
-
-    A single material covers every solid, even when it has explicit References.
-    Otherwise empty References denotes the default for the remaining solids.
-    Only local topology identity is used to deduplicate repeated references;
-    this does not compare where materials occur in reference/candidate models.
-    """
-    materials = [
-        obj for obj in objects if "Material" in obj.TypeId and getattr(obj, "Material", None)
-    ]
-    if len(materials) == 1:
-        return grouped_material_counts(
-            [{**material_values(materials[0]), "body_count": total_solids}]
-        )
-    groups, assigned = {}, {}
-    default = None
-    for obj in materials:
-        values = material_values(obj)
-        signature = material_signature(values)
-        group = groups.setdefault(signature, {"values": values, "solids": {}})
-        if not obj.References:
-            if default is not None and default != signature:
-                raise ValueError("Multiple materials have empty/default References")
-            default = signature
-            continue
-        for parent, subnames in obj.References:
-            for subname in subnames or ("",):
-                # Keep the referenced topology: transforming a copy would give
-                # repeated references different identities and inflate counts.
-                shape = parent.getSubObject(subname)
-                solids = shape.Solids
-                if not solids:
-                    raise ValueError(
-                        f"Material reference {parent.Name}/{subname} contains no solids"
-                    )
-                _add_distinct_solids(group["solids"], solids)
-                _add_distinct_solids(assigned, solids)
-    assigned_count = sum(len(bucket) for bucket in assigned.values())
-    if assigned_count > total_solids:
-        raise ValueError("Material references contain more solids than the analysed geometry")
-    counts = []
-    for signature, group in groups.items():
-        count = sum(len(bucket) for bucket in group["solids"].values())
-        if signature == default:
-            count += total_solids - assigned_count
-        counts.append({**group["values"], "body_count": count})
-    return grouped_material_counts(counts)
-
-
-def extract_material(doc):
-    for o in doc.Objects:
-        if "Material" in o.TypeId and getattr(o, "Material", None):
-            return material_values(o)
-    return {}
-
-
-# CalculiX/ccxtools AnalysisType string -> scorer vocabulary
-_ANALYSIS = {
-    "static": "static",
-    "thermomech": "thermal_mechanical",
-    "buckling": "buckling",
-    "check": "static",
-}
-
-
-def extract_solver(doc):
-    for o in doc.Objects:
-        if "Solver" in o.TypeId or "Ccx" in o.TypeId:
-            at = getattr(o, "AnalysisType", "static")
-            if str(at) not in _ANALYSIS:
-                raise ValueError(f"Unsupported CalculiX analysis type: {at!r}")
-            return _ANALYSIS[str(at)], getattr(o, "GeometricalNonlinearity", "linear")
-    return "static", "linear"
-
-
-def refs_str(o):
-    try:
-        return "; ".join(f"{r[0].Name}/{','.join(r[1])}" for r in o.References)
-    except Exception:
-        return ""
-
-
-def force_direction(o):
-    """Unit direction the force actually points, or None.
-
-    Lets the scorer check WHICH WAY the load points, not just its magnitude.
-    DirectionVector is already the FINAL applied direction: the CalculiX writer
-    (Mod/Fem/femsolver/calculix/write_constraint_force.py) forms the nodal load
-    straight from DirectionVector and never references `Reversed`, so we must NOT
-    negate it here. A load written as (DirectionVector, Reversed=True) is
-    physically identical to the same DirectionVector with Reversed=False; the
-    solved displacement field confirms CalculiX ignores `Reversed`."""
-    dv = getattr(o, "DirectionVector", None)
-    if dv is None or getattr(dv, "Length", 0) < 1e-9:
-        return None
-    u = FreeCAD.Vector(dv)
-    u.normalize()
-    return [u.x, u.y, u.z]
-
-
-def refs_centroid(o):
-    """Area/length-weighted centroid (mm) of the loaded sub-elements, or None.
-
-    Both reference and candidate are built on the same source solid, so this point is
-    comparable even when their internal face/edge indices differ - it lets the
-    scorer check WHERE the load is applied without relying on reference names."""
-    pts, wts = [], []
-    try:
-        for obj, subs in o.References:
-            shp = getattr(obj, "Shape", None)
-            if shp is None:
-                continue
-            for sub in subs or [None]:
-                el = shp.getElement(sub) if sub else shp
-                c = el.CenterOfMass
-                w = getattr(el, "Area", None) or getattr(el, "Length", None) or 1.0
-                pts.append((c.x, c.y, c.z))
-                wts.append(float(w))
-    except Exception:
-        return None
-    if not pts:
-        return None
-    tw = sum(wts) or 1.0
-    return [sum(p[i] * w for p, w in zip(pts, wts, strict=True)) / tw for i in range(3)]
-
-
-def extract_bcs_loads(doc):
-    bcs, loads = [], []
-    for o in doc.Objects:
-        t = o.TypeId
-        if t in ("Fem::ConstraintFixed", "Fem::ConstraintDisplacement"):
-            bcs.append({"type": "fixed", "location": refs_str(o)})
-        elif t in ("Fem::ConstraintBearing",):
-            bcs.append({"type": "support", "location": refs_str(o)})
-        elif t == "Fem::ConstraintForce":
-            loads.append(
-                {
-                    "type": "force",
-                    "magnitude_N": qty(o.Force, "N"),
-                    "reversed": bool(getattr(o, "Reversed", False)),
-                    "direction": force_direction(o),
-                    "centroid": refs_centroid(o),
-                    "location": refs_str(o),
-                }
-            )
-        elif t == "Fem::ConstraintPressure":
-            loads.append(
-                {
-                    "type": "pressure",
-                    "magnitude_Pa": qty(o.Pressure, "Pa"),
-                    "magnitude_N": 0,
-                    "reversed": bool(getattr(o, "Reversed", False)),
-                    "centroid": refs_centroid(o),
-                    "location": refs_str(o),
-                }
-            )
-        elif t == "Fem::ConstraintSelfWeight":
-            loads.append({"type": "self_weight", "magnitude_N": 0})
-    return bcs, loads
-
-
-def _topo(x):
-    """A Part TopoShape from either a TopoShape or a document object, else None."""
-    if x is None:
-        return None
-    if getattr(x, "Solids", None) is not None:  # already a TopoShape (has .Solids)
-        return x
-    return getattr(x, "Shape", None)  # a document object -> its shape
-
-
-def analysed_solids(doc):
-    """The solid shape(s) that make up the analysed geometry, as a list.
-
-    The geometry-fidelity check compares the analysed volume to the STEP's TOTAL
-    volume, so for a multi-body part we must return EVERY analysed solid (their
-    volumes are summed by the caller), not just one - while never counting leftover
-    imported sub-parts or a fusion's consumed inputs (that would double-count).
-    Priority:
-      1) the geometry the FEM mesh was generated on (mesh object's Part/Shape link)
-         - exactly what was meshed; a compound reports all its solids, so this is
-           correct for one solid, a fusion, or a multi-solid compound;
-      2) the DISTINCT bodies referenced by the analysis constraints (BCs/loads) -
-         robust for a disjoint multi-body assembly and immune to leftover sub-parts,
-         because only the bodies actually constrained/loaded are counted;
-      3) the single largest-volume solid object - last resort (single-body only).
-    """
-    # 1) meshed geometry (one object, possibly a compound of several solids)
-    for o in doc.Objects:
-        if "FemMeshShape" in o.TypeId or "FemMeshGmsh" in o.TypeId:
-            shp = _topo(getattr(o, "Part", None)) or _topo(getattr(o, "Shape", None))
-            if shp is not None and getattr(shp, "Solids", None):
-                return [shp]
-    # 2) the distinct bodies the analysis constraints reference
-    refd = {}
-    for o in doc.Objects:
-        if not o.TypeId.startswith("Fem::Constraint"):
-            continue
-        try:
-            refs = o.References or []
-        except Exception:
-            refs = []
-        for parent, _subs in refs:
-            shp = getattr(parent, "Shape", None)
-            if shp is not None and getattr(shp, "Solids", None):
-                refd[getattr(parent, "Name", id(parent))] = shp
-    if refd:
-        return list(refd.values())
-    # 3) the single largest-volume solid object
-    best, best_vol = None, 0.0
-    for o in doc.Objects:
-        shp = getattr(o, "Shape", None)
-        if shp is not None and getattr(shp, "Solids", None) and shp.Volume > best_vol:
-            best, best_vol = shp, shp.Volume
-    return [best] if best is not None else []
-
-
-def extract_geometry(doc):
-    return geometry_facts(analysed_solids(doc))
-
-
-def assert_safe_fcstd(path):
-    """Reject an FCStd whose zip embeds a path-traversal member (zip-slip).
-
-    Included files may otherwise be extracted outside the intended directory
-    when FreeCAD opens the document. Validate every member before opening it:
-    absolute paths, drive letters, and ``..`` components that escape the archive
-    root are rejected. Legitimate FCStd members use relative paths."""
-    try:
-        with zipfile.ZipFile(path) as zf:
-            names = zf.namelist()
-    except zipfile.BadZipFile:
-        return  # not a zip (unlikely for .FCStd); openDocument will handle it
-    for name in names:
-        norm = name.replace("\\", "/")
-        if norm.startswith("/") or (len(norm) > 1 and norm[1] == ":"):
-            raise SystemExit(
-                f"[fcstd_adapter] SECURITY: absolute path in FCStd zip member: {name!r}"
-            )
-        parts = [p for p in norm.split("/") if p not in ("", ".")]
-        depth = 0
-        for p in parts:
-            depth += -1 if p == ".." else 1
-            if depth < 0:
-                raise SystemExit(
-                    f"[fcstd_adapter] SECURITY: path traversal in FCStd zip member: {name!r}"
-                )
-
-
 def main():
-    args = sys.argv
-    import_check = "import-check" in args
-    verify_solve = "verify-solve" in args
-    geometry_only = "geometry-only" in args
-    runtime_only = "runtime-info" in args
-    fcstd = next((a for a in args if a.lower().endswith(".fcstd")), None)
-    outs = [a for a in args if a.lower().endswith(".json")]
-    if import_check:
+    args = sys.argv[1:]
+    if "import-check" in args:
         print("[fcstd_adapter] pure replay module loaded")
         return
-    if runtime_only:
-        if not outs:
-            raise SystemExit("runtime-info requires an output JSON path")
-        with open(outs[0], "w", encoding="utf-8") as fh:
-            json.dump({"runtime": runtime_info(require_calculix=True)}, fh, indent=2)
-        print(f"[fcstd_adapter] wrote {outs[0]}  runtime_info=true")
-        return
-    if not fcstd:
-        raise SystemExit("usage: freecadcmd fcstd_adapter.py <input.FCStd> <output.json>")
-    out = outs[0] if outs else os.path.splitext(fcstd)[0] + ".scorer.json"
-
-    assert_safe_fcstd(fcstd)
-    doc = FreeCAD.openDocument(fcstd)
-    if geometry_only:
-        out_dict = {
-            "source_fcstd": os.path.basename(fcstd),
-            "geometry": extract_geometry(doc),
-            "runtime": runtime_info(),
-        }
-        with open(out, "w", encoding="utf-8") as fh:
-            json.dump(out_dict, fh, indent=2)
-        FreeCAD.closeDocument(doc.Name)
-        print(f"[fcstd_adapter] wrote {out}  geometry_only=true")
-        return
-    res = find_result(doc)
-    if res is None:
-        failure_reason = f"no FEM result object found in {fcstd}"
-        out_dict = {
-            "source_fcstd": os.path.basename(fcstd),
-            "no_result": True,
-            "extraction_error": failure_reason,
-            "solver": {"converged": False},
-            "results": {},
-            "artifacts": {},
-            "runtime": runtime_info(),
-        }
-        with open(out, "w", encoding="utf-8") as fh:
-            json.dump(out_dict, fh, indent=2)
-        FreeCAD.closeDocument(doc.Name)
-        print(f"[fcstd_adapter] wrote {out}  no_result=true")
-        return
-
-    analysis, nonlinearity = extract_solver(doc)
-    bcs, loads = extract_bcs_loads(doc)
-    material = extract_material(doc)
-    geometry = extract_geometry(doc)
-
-    results = extract_result_values(res)
-    disp = list(getattr(res, "DisplacementLengths", []) or [])
-
-    active_analysis, _solver, source_mesh = find_replay_context(doc, res, len(disp))
-    source_shape = linked_mesh_shape(source_mesh)
-    materials = extract_material_body_counts(active_analysis.Group, len(source_shape.Solids))
-
-    # Mesh stats for the mesh-budget category. CRITICAL: tie the reported mesh to
-    # the SOLVE, not to whatever mesh is attached to the result. A genuine result
-    # carries exactly one displacement value per mesh node, so the mesh actually
-    # solved on is the one whose NodeCount == len(DisplacementLengths). Reading
-    # Reading res.Mesh alone can select a mesh that differs from the one used for
-    # the stored result, so choose the mesh that
-    # matches the displacement field (searching every mesh in the document, not
-    # just res.Mesh) and treat the result as incoherent when, for a displacement
-    # analysis, no mesh matches it.
-    n_solved = len(disp)
-    solved_fm = None
-    # search every mesh in the document, plus the result's own attached mesh (so we
-    # do not depend on res.Mesh also being enumerated in doc.Objects)
-    mesh_candidates = list(doc.Objects)
-    if getattr(res, "Mesh", None) is not None:
-        mesh_candidates.append(res.Mesh)
-    for o in mesh_candidates:
-        cand_fm = getattr(o, "FemMesh", None)
-        nc = getattr(cand_fm, "NodeCount", 0) if cand_fm is not None else 0
-        if not nc:
-            continue
-        if n_solved:
-            if nc == n_solved:
-                solved_fm = cand_fm
-                break
-        else:
-            solved_fm = cand_fm  # no displacement field to match against
-            break
-    mesh = {}
-    if solved_fm is not None:
-        mesh = {
-            "num_nodes": solved_fm.NodeCount,
-            "num_elements": solved_fm.VolumeCount,
-            "element_type": "tet10",
-        }
-
-    # Cheap coherence prechecks before the authoritative solver replay. Passing
-    # these checks is necessary but is NOT evidence that CalculiX ran:
-    #  (a) a static/thermomech result MUST carry a displacement field - it is the
-    #      PRIMARY solution variable, and vonMises/MaxShear are DERIVED from it; a
-    #      result with derived stress but no displacement was hand-filled;
-    #  (b) the displacement field MUST correspond to a real mesh in the document
-    #      (NodeCount == len(disp)) - otherwise the mesh was swapped after solving
-    #      after solving and incorrectly receive mesh-budget credit.
-    static_no_disp = analysis in ("static", "thermal_mechanical") and not disp
-    mesh_matches_solve = (n_solved == 0) or (solved_fm is not None)
-    coherent = (not static_no_disp) and mesh_matches_solve
-
-    out_dict = {
-        "source_fcstd": os.path.basename(fcstd),
-        "analysis_type": analysis,
-        "geometrical_nonlinearity": nonlinearity,
-        "units": {"length": "mm", "force": "N", "stress": "MPa"},
-        "material": material,
-        "materials": materials,
-        "geometry": geometry,
-        "boundary_conditions": bcs,
-        "loads": loads,
-        "mesh": mesh,
-        "results": results,
-        "runtime": runtime_info(require_calculix=verify_solve),
-    }
-    verification = None
-    replayed_results = None
-    if verify_solve and coherent:
-        verification, replayed_results = verify_solver_replay(doc, res, analysis, out)
-    elif verify_solve:
-        verification = {
-            "passed": False,
-            "status": "precheck_failed",
-            "relative_tolerance": REPLAY_REL_TOL,
-            "failures": ["stored result failed displacement/mesh coherence checks"],
-            "field_comparisons": {},
-        }
-
-    replay_accepted = bool(verification and verification.get("passed"))
-    if replay_accepted:
-        # Only the trusted validator-side replay can establish convergence and
-        # reproducibility. Within the strict tolerance, score trusted replayed
-        # values. For an accepted 2%-10% mismatch, retain the stored values so a
-        # deterministic FreeCAD remapping difference does not replace the result
-        # that was actually saved by the original solve.
-        out_dict["results"], result_source = select_scored_results(
-            out_dict["results"], replayed_results, verification
-        )
-        replay_verified = verification.get("status") == "verified"
-        out_dict["solver"] = {
-            "name": "CalculiX",
-            "converged": True,
-            "replay_verified": replay_verified,
-            "replay_accepted": True,
-            "replay_status": verification.get("status"),
-            "result_source": result_source,
-        }
-        out_dict["artifacts"] = {
-            "result_file": os.path.basename(fcstd),
-        }
+    outputs = [value for value in args if value.lower().endswith(".json")]
+    if not outputs:
+        raise SystemExit("An output JSON path is required")
+    output = outputs[-1]
+    if "runtime-info" in args:
+        payload = {"runtime": runtime_info(require_calculix=True)}
     else:
-        # A loaded result object and matching array lengths are structural checks,
-        # not proof that CalculiX ran. Never vouch for unverified stored arrays.
-        out_dict["solver"] = {
-            "name": "CalculiX",
-            "converged": False,
-            "replay_verified": False,
-            "replay_accepted": False,
-        }
-        out_dict["artifacts"] = {}
-        if verification is not None:
-            out_dict["meta"] = {"solver_replay": verification}
-
-    if not coherent:
-        if static_no_disp:
-            out_dict["incoherent_result"] = (
-                f"{analysis} result reports {sorted(results)} but the displacement field is "
-                "empty - the primary solution variable is missing, so this was not solved"
-            )
-        else:
-            out_dict["incoherent_result"] = (
-                f"no mesh in the document matches the {n_solved}-value displacement field "
-                "(NodeCount != len(DisplacementLengths)) - the reported mesh was not the one "
-                "solved on (mesh/result mismatch)"
-            )
-    elif verification is not None and not replay_accepted:
-        out_dict["incoherent_result"] = (
-            "stored FEM fields were not reproduced by a trusted validator-side CalculiX replay"
-        )
-    if verification is not None and replay_accepted:
-        out_dict["meta"] = {"solver_replay": verification}
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump(out_dict, fh, indent=2)
-    FreeCAD.closeDocument(doc.Name)
-    print(f"[fcstd_adapter] wrote {out}  results={out_dict['results']}")
+        source = next(value for value in args if value.lower().endswith(".fcstd"))
+        verify = "verify-solve" in args
+        doc = None
+        try:
+            assert_safe_fcstd(source, require_document=True)
+            doc = FreeCAD.openDocument(source)
+            payload, snapshot, analysis, solver = _extract_document(doc)
+            if verify:
+                verification, replayed = _replay(analysis, solver, snapshot)
+                passed = verification["passed"]
+                payload["meta"] = {"solver_replay": verification}
+                payload["solver"] = {
+                    "converged": passed,
+                    "replay_accepted": passed,
+                    "replay_verified": verification["status"] == "verified",
+                }
+                payload["artifacts"] = {"result_file": "saved.FCStd"} if passed else {}
+                if passed:
+                    payload["results"], source_name = select_scored_results(
+                        payload["results"], _result_values(replayed), verification
+                    )
+                    payload["solver"]["result_source"] = source_name
+        except (ValueError, RuntimeError) as exc:
+            if not verify or isinstance(exc, UnsupportedSetupError):
+                raise
+            payload = {
+                "solver": {"converged": False},
+                "results": {},
+                "meta": {"candidate_extraction_failure": str(exc)},
+            }
+        finally:
+            if doc is not None:
+                FreeCAD.closeDocument(doc.Name)
+    with open(output, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, indent=2, allow_nan=False)
 
 
 main()

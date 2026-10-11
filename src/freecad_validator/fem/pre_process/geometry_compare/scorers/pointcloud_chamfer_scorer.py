@@ -8,10 +8,6 @@ from freecad_validator.fem.pre_process.geometry_compare.brep_diff.geometry_ops i
     all_samples,
     document_scale,
     sample_distance_stats,
-    surface_distance_stats,
-)
-from freecad_validator.fem.pre_process.geometry_compare.brep_diff.methods.mesh_boolean import (
-    tessellate_solid,
 )
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import (
     BrepDocument,
@@ -20,7 +16,9 @@ from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import 
 from freecad_validator.fem.pre_process.geometry_compare.scorers.scorer_base import (
     BaseScorer,
     ScoreResult,
+    load_shape,
 )
+from freecad_validator.fem.pre_process.spatial import SpatialShape, shape_surface_stats
 
 # Scale-normalized decay constants: the score reaches ~0.37 (~= 1/e) at a mean deviation of TAU_MEAN
 # (0.5% of the bbox diagonal) and at a p95 deviation of TAU_P95 (2% of the diagonal). The mean
@@ -31,32 +29,20 @@ TAU_P95 = 0.02
 W_MEAN = 0.5
 W_P95 = 0.5
 
-# Area-uniform surface sampling budget for the seam-invariant distance. The distance is
-# point-to-SURFACE (not point-to-point), so a few thousand points already resolve the
-# statistic to well below TAU_MEAN·D for a coincident surface; the count only bounds how
-# small a moved feature can be before it stops moving the mean. The seed is fixed so a
-# re-score reproduces the same cloud.
-SURFACE_SAMPLE_COUNT = 6000
-SURFACE_SAMPLE_SEED = 0
-
 
 def _surface_stats(
     target_doc: BrepDocument, candidate_doc: BrepDocument, config: DiffConfig
 ) -> dict[str, float] | None:
-    """Seam-invariant target<->candidate surface-distance stats, or None if the
-    watertight tessellation is unavailable (non-manifold body, missing FreeCAD) so the
-    caller falls back to the legacy per-face sampled clouds. Reuses the same
-    `tessellate_solid` path as the mesh-boolean diff method — no ICP."""
-    try:
-        verts_t, tris_t = tessellate_solid(target_doc.path, config.tessellation_deflection, config)
-        verts_c, tris_c = tessellate_solid(
-            candidate_doc.path, config.tessellation_deflection, config
-        )
-        return surface_distance_stats(
-            verts_t, tris_t, verts_c, tris_c, SURFACE_SAMPLE_COUNT, SURFACE_SAMPLE_SEED
-        )
-    except Exception:
+    """Read-only surface distances; spatial regions use sampled boundaries instead."""
+    target, candidate = [
+        doc._shape if doc._shape is not None else load_shape(doc.path, config)
+        for doc in (target_doc, candidate_doc)
+    ]
+    if target is None or candidate is None:
+        raise ValueError("Missing geometry for surface-distance comparison")
+    if isinstance(target, SpatialShape) or isinstance(candidate, SpatialShape):
         return None
+    return shape_surface_stats(target, candidate, config)
 
 
 class PointCloudChamferScorer(BaseScorer):

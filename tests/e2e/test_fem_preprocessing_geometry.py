@@ -9,15 +9,11 @@ pytestmark = pytest.mark.needs_freecad
 FreeCAD = pytest.importorskip("FreeCAD")
 if not getattr(FreeCAD, "__file__", None):
     pytest.skip("Requires real FreeCAD bindings", allow_module_level=True)
-pytest.importorskip("manifold3d")
 import Part  # noqa: E402
+from fem_geometry_fixtures import export_geometry  # noqa: E402
 
-from freecad_validator.fem.pre_process import scorer as scorer_module  # noqa: E402
 from freecad_validator.fem.pre_process.errors import EvaluationError  # noqa: E402
-from freecad_validator.fem.pre_process.geometry import (  # noqa: E402
-    export_geometry,
-    read_geometry,
-)
+from freecad_validator.fem.pre_process.geometry import read_geometry  # noqa: E402
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import (  # noqa: E402
     DiffConfig,
 )
@@ -67,21 +63,21 @@ def test_wrong_edit_despite_equal_volume_and_area(scorer, hole_case):
         hole_case["wrong"],
     )
     assert result.subscores["global_geometry"] == pytest.approx(1)
-    assert result.subscores["region_edit_overlap"] == 0
+    assert result.details["region_evaluated"] is False
+    assert result.details["geometry_score_upper_bound"] <= 0.95
     assert result.score == 0
 
 
-def test_extra_filled_hole_has_lower_precision(scorer, hole_case):
+def test_extra_filled_hole_fails_fidelity_bound(scorer, hole_case):
     result = scorer.score_detailed(
         hole_case["raw"],
         hole_case["reference"],
         hole_case["extra"],
     )
-    region = result.details["component_subscores"]["region_edit_overlap"]
-    assert 0.3 < region["precision"] < 0.7
-    assert region["recall"] == 1
+    assert result.details["region_evaluated"] is False
+    assert 0 < result.details["geometry_score_upper_bound"] <= 0.95
     assert result.score == 0
-    assert 0 < result.details["geometry_score"] < 1
+    assert result.details["geometry_score"] is None
 
 
 def test_compound_partitions_and_split_faces_do_not_reduce_score(scorer, tmp_path):
@@ -190,12 +186,6 @@ def test_repeated_path_reads_updated_geometry(scorer, hole_case):
     assert scorer.score(raw, reference, reference) == 1
     export_geometry(read_geometry(raw), reference)
     assert scorer.score(raw, hole_case["extra"], reference) == 0
-
-
-def test_missing_boolean_dependency_is_an_evaluation_error(monkeypatch):
-    monkeypatch.setattr(scorer_module, "find_spec", lambda name: None)
-    with pytest.raises(EvaluationError, match="requires manifold3d"):
-        PreProcessScorer()
 
 
 def test_unchanged_reference_still_penalizes_changed_answer(scorer, hole_case):

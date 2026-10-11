@@ -53,7 +53,13 @@ LABEL = dict(
     boundary_conditions=[{"type": "fixed", "location": "Body/Face10"}],
     loads=[{"type": "force", "magnitude_N": 500.0, "location": "Body/Face14"}],
     results={"max_displacement_mm": 3.0e-4, "max_von_mises_MPa": 0.35, "max_shear_MPa": 0.19},
-    geometry={"volume_mm3": 1.0e6, "characteristic_length_mm": 387.0},
+    geometry={
+        "volume_mm3": 1.0e6,
+        "characteristic_length_mm": 387.0,
+        "num_solids": 1,
+        "num_compsolids": 0,
+        "shape_types": ["Solid"],
+    },
     mesh={"num_nodes": 20000, "num_elements": 12000},  # mesh-budget baseline
 )
 
@@ -68,7 +74,13 @@ def _cand(**over):
         mesh={"num_nodes": 20000, "num_elements": 12000},
         solver={"converged": True, "applied_load_N": 500.0, "reaction_force_N": [0, 0, 500.1]},
         results={"max_displacement_mm": 3.05e-4, "max_von_mises_MPa": 0.37, "max_shear_MPa": 0.196},
-        geometry={"volume_mm3": 1.005e6, "characteristic_length_mm": 387.0},
+        geometry={
+            "volume_mm3": 1.005e6,
+            "characteristic_length_mm": 387.0,
+            "num_solids": 1,
+            "num_compsolids": 0,
+            "shape_types": ["Solid"],
+        },
         artifacts={"result_file": "c.FCStd", "input_deck": "c.FCStd"},
     )
     base.update(over)
@@ -180,55 +192,55 @@ def test_omitting_critical_quantity_gates_to_zero():
     assert rep.gates_triggered
 
 
-def test_gross_wrong_load_magnitude_gates_to_zero():
-    """A grossly wrong applied load is a different problem and must gate, even if
-    the reported results happen to sit near the label (compensating-error blind spot)."""
+def test_gross_wrong_load_magnitude_receives_partial_setup_credit():
+    """Existing setup mismatch receives continuous agreement credit."""
     rep = score_trusted_payloads(
         STEP, LABEL, _cand(loads=[{"type": "force", "magnitude_N": 5000.0}])
     )  # 10x the label's 500 N
-    assert rep.overall_score == 0
-    assert rep.grade == "invalid"
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
-    assert rep.gates_triggered
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
 def test_mild_load_mismatch_penalized_not_gated():
     """An 8% load error dents problem_setup but does not gate."""
     rep = score_trusted_payloads(
         STEP, LABEL, _cand(loads=[{"type": "force", "magnitude_N": 540.0}])
-    )  # +8% -> major, no gate
+    )  # +8% receives continuous setup credit.
     assert not rep.gates_triggered
     assert rep.subscores["problem_setup"] < 100
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
+    assert any(f["code"] == "SETUP_MISMATCH" for f in rep.failure_modes_detected)
 
 
-def test_reversed_force_direction_gates_to_zero():
-    """Same magnitude but the force is reversed (180 deg) -> identical result magnitudes,
-    so accuracy is blind and only the load check catches it -> gate."""
+def test_reversed_force_direction_receives_partial_setup_credit():
+    """Existing setup mismatch receives continuous agreement credit."""
     rep = score_trusted_payloads(
         STEP,
         {**LABEL, "loads": [{"type": "force", "magnitude_N": 500.0, "direction": [0, 0, 1]}]},
         _cand(loads=[{"type": "force", "magnitude_N": 500.0, "direction": [0, 0, -1]}]),
     )
-    assert rep.overall_score == 0
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
-    assert rep.gates_triggered
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
-def test_misaligned_force_direction_gates_to_zero():
-    """Past the tight alignment bound (>= 15 deg) the load points the wrong way -> gate."""
+def test_misaligned_force_direction_receives_partial_setup_credit():
+    """Existing setup mismatch receives continuous agreement credit."""
     rep = score_trusted_payloads(
         STEP,
         {**LABEL, "loads": [{"type": "force", "magnitude_N": 500.0, "direction": [0, 0, 1]}]},
         _cand(loads=[{"type": "force", "magnitude_N": 500.0, "direction": [1, 0, 0]}]),
     )  # 90 deg
-    assert rep.overall_score == 0
-    assert rep.gates_triggered
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
 def test_small_direction_offset_penalized_not_gated():
-    """A small (6-15 deg) direction offset is a wrong load -> penalty, but not yet a gate."""
+    """A small direction offset reduces continuous setup agreement."""
     rep = score_trusted_payloads(
         STEP,
         {**LABEL, "loads": [{"type": "force", "magnitude_N": 500.0, "direction": [0, 0, 1]}]},
@@ -236,7 +248,7 @@ def test_small_direction_offset_penalized_not_gated():
     )  # ~10 deg off
     assert not rep.gates_triggered
     assert 0 < rep.subscores["problem_setup"] < 100
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
+    assert any(f["code"] == "SETUP_MISMATCH" for f in rep.failure_modes_detected)
 
 
 def test_matching_load_magnitude_and_direction_scores_high():
@@ -271,40 +283,43 @@ def test_per_face_matched_loads_score_high():
 
 
 def test_compensating_swap_caught_though_totals_match():
-    """Loads swapped between two faces: the net-aggregate total is identical (1500 N), so
-    the old aggregate missed it - per-face matching catches the 1000<->500 swap and gates."""
+    """Existing setup mismatch receives continuous agreement credit."""
     label_loads = [_fl(1000, (10, 0, 0)), _fl(500, (-10, 0, 0))]
     cand_loads = [_fl(500, (10, 0, 0)), _fl(1000, (-10, 0, 0))]
     rep = score_trusted_payloads(STEP, {**LABEL, "loads": label_loads}, _cand(loads=cand_loads))
-    assert rep.overall_score == 0
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
-    assert rep.gates_triggered
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
-def test_load_on_wrong_face_flagged_missing_and_spurious():
-    """A load on a different face than the label's -> unmatched: a missing load at the
-    label's face and a spurious one at the candidate's (neither gates on its own)."""
+def test_load_on_wrong_face_reduces_setup_credit():
+    """Existing setup mismatch receives continuous agreement credit."""
     rep = score_trusted_payloads(
         STEP, {**LABEL, "loads": [_fl(500, (0, 0, 0))]}, _cand(loads=[_fl(500, (300, 0, 0))])
-    )  # > match_tol apart
-    assert any(f["code"] == FailureMode.WRONG_LOAD for f in rep.failure_modes_detected)
-    assert any(
-        "applies none there" in fb or "not present in the label" in fb
-        for fb in rep.engineering_feedback
-    )
+    )  # The force surface is displaced by 300 mm.
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
-def test_geometry_mismatch_vs_step_gates_to_zero():
+def test_geometry_mismatch_vs_step_receives_partial_setup_credit():
     rep = score_trusted_payloads(
         STEP, LABEL, _cand(geometry={"volume_mm3": 5.0e6, "characteristic_length_mm": 660.0})
     )
-    assert rep.overall_score == 0
-    assert any(f["code"] == FailureMode.GEOMETRY_MISMATCH for f in rep.failure_modes_detected)
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
 def test_wrong_material_vs_label_flagged():
     rep = score_trusted_payloads(STEP, LABEL, _cand(material={"E_MPa": 70000.0, "nu": 0.33}))
-    assert any(f["code"] == FailureMode.WRONG_MATERIAL for f in rep.failure_modes_detected)
+    assert 0 < rep.overall_score < 100
+    assert 0 < rep.subscores["problem_setup"] < 100
+    assert not rep.gates_triggered
+    assert rep.pass_fail_flags["setup_correct"] is False
 
 
 def test_missing_restraint_caps_score():
@@ -407,7 +422,7 @@ def test_candidate_fcstd_extraction_requires_trusted_solver_replay():
     assert extract.call_args_list[2].kwargs["extra_args"] == ["verify-solve"]
 
 
-def test_required_boolean_raw_step_topology_gates_before_full_scoring():
+def test_required_boolean_raw_step_topology_receives_continuous_setup_credit():
     source_geometry = _topology_geometry([1.0e6])
     reference_geometry = _topology_geometry(
         [0.4e6, 0.6e6],
@@ -419,8 +434,8 @@ def test_required_boolean_raw_step_topology_gates_before_full_scoring():
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
                 source_geometry,
-                {"geometry": reference_geometry},
-                {"geometry": source_geometry},
+                {**LABEL, "geometry": reference_geometry},
+                _cand(geometry=source_geometry),
             ],
         ) as extract:
             rep = score_step_fcstd(
@@ -432,11 +447,10 @@ def test_required_boolean_raw_step_topology_gates_before_full_scoring():
                 require_boolean=True,
             )
 
-    assert rep.overall_score == 0
-    assert rep.gates_triggered == [{"reason": FailureMode.BOOLEAN_NOT_PERFORMED}]
+    assert rep.overall_score > 0
+    assert rep.gates_triggered == []
+    assert rep.subscores["problem_setup"] < 100
     assert len(extract.call_args_list) == 3
-    assert extract.call_args_list[1].kwargs["extra_args"] == ["geometry-only"]
-    assert extract.call_args_list[2].kwargs["extra_args"] == ["geometry-only"]
 
 
 def test_required_boolean_minimum_topology_allows_per_region_differences():
@@ -468,14 +482,12 @@ def test_required_boolean_minimum_topology_allows_per_region_differences():
     candidate_gate_geometry["num_faces"] = 110
     candidate_gate_geometry["num_edges"] = 165
     label = {**LABEL, "geometry": reference_geometry}
-    candidate = _cand(geometry=reference_geometry)
+    candidate = _cand(geometry=candidate_gate_geometry)
     with TemporaryDirectory() as extract_dir:
         with patch(
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
                 source_geometry,
-                {"geometry": reference_geometry},
-                {"geometry": candidate_gate_geometry},
                 label,
                 candidate,
             ],
@@ -493,11 +505,11 @@ def test_required_boolean_minimum_topology_allows_per_region_differences():
     assert source_geometry["surface_area_mm2"] == reference_geometry["surface_area_mm2"]
     assert rep.overall_score > 0
     assert rep.gates_triggered == []
-    assert len(extract.call_args_list) == 5
+    assert len(extract.call_args_list) == 3
     assert extract.call_args_list[-1].kwargs["extra_args"] == ["verify-solve"]
 
 
-def test_required_boolean_wrong_topology_gates_as_geometry_mismatch():
+def test_required_boolean_wrong_topology_reduces_setup_credit():
     source_geometry = _topology_geometry([1.0e6])
     reference_geometry = _topology_geometry(
         [0.4e6, 0.6e6],
@@ -510,8 +522,8 @@ def test_required_boolean_wrong_topology_gates_as_geometry_mismatch():
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
                 source_geometry,
-                {"geometry": reference_geometry},
-                {"geometry": wrong_geometry},
+                {**LABEL, "geometry": reference_geometry},
+                _cand(geometry=wrong_geometry),
             ],
         ) as extract:
             rep = score_step_fcstd(
@@ -523,12 +535,13 @@ def test_required_boolean_wrong_topology_gates_as_geometry_mismatch():
                 require_boolean=True,
             )
 
-    assert rep.overall_score == 0
-    assert rep.gates_triggered == [{"reason": FailureMode.GEOMETRY_MISMATCH}]
+    assert rep.overall_score > 0
+    assert rep.gates_triggered == []
+    assert rep.subscores["problem_setup"] < 100
     assert len(extract.call_args_list) == 3
 
 
-def test_required_boolean_wrong_container_gates_as_geometry_mismatch():
+def test_required_boolean_wrong_container_reduces_setup_credit():
     source_geometry = _topology_geometry([0.4e6, 0.6e6])
     reference_geometry = _topology_geometry(
         [0.4e6, 0.6e6],
@@ -541,8 +554,8 @@ def test_required_boolean_wrong_container_gates_as_geometry_mismatch():
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
                 source_geometry,
-                {"geometry": reference_geometry},
-                {"geometry": wrong_container_geometry},
+                {**LABEL, "geometry": reference_geometry},
+                _cand(geometry=wrong_container_geometry),
             ],
         ) as extract:
             rep = score_step_fcstd(
@@ -554,74 +567,71 @@ def test_required_boolean_wrong_container_gates_as_geometry_mismatch():
                 require_boolean=True,
             )
 
-    assert rep.overall_score == 0
-    assert rep.gates_triggered == [{"reason": FailureMode.GEOMETRY_MISMATCH}]
-    assert "num_compsolids" in rep.evidence[1]
-    assert "shape_types" in rep.evidence[2]
+    assert rep.overall_score > 0
+    assert rep.gates_triggered == []
+    assert rep.subscores["problem_setup"] < 100
     assert len(extract.call_args_list) == 3
 
 
-def test_required_boolean_rejects_indistinguishable_reference_topology():
+def test_required_boolean_indistinguishable_topology_uses_continuous_setup():
     geometry = _topology_geometry([1.0e6])
-    with TemporaryDirectory() as extract_dir:
-        with patch(
+    with (
+        TemporaryDirectory() as extract_dir,
+        patch(
+            "freecad_validator.fem.step_interface._extract",
+            side_effect=[geometry, {**LABEL, "geometry": geometry}, _cand(geometry=geometry)],
+        ),
+    ):
+        report = score_step_fcstd(
+            "source.step",
+            "reference.FCStd",
+            "candidate.FCStd",
+            extract_dir=extract_dir,
+            require_boolean=True,
+        )
+    assert report.subscores["problem_setup"] == 100
+    assert not report.gates_triggered
+
+
+def test_required_preprocessing_matching_geometry_uses_geometry_worker():
+    input_geometry = _topology_geometry([1.0e6])
+    with (
+        TemporaryDirectory() as extract_dir,
+        patch(
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
-                geometry,
-                {"geometry": geometry},
-                {"geometry": geometry},
+                input_geometry,
+                LABEL,
+                _cand(),
+                {"score": None, "reference_changed_body_count": 0, "extra_changed_body_count": 0},
             ],
-        ):
-            with pytest.raises(ExtractionError, match="indistinguishable"):
-                score_step_fcstd(
-                    "source.step",
-                    "reference.FCStd",
-                    "candidate.FCStd",
-                    freecad_cmd="/fake/freecadcmd",
-                    extract_dir=extract_dir,
-                    require_boolean=True,
-                )
-
-
-def test_required_preprocessing_matching_label_geometry_gates_before_other_scoring():
-    input_geometry = _topology_geometry([1.0e6])
-    matching_geometry = {"geometry": _topology_geometry([1.0e6])}
-    with TemporaryDirectory() as extract_dir:
-        with patch(
-            "freecad_validator.fem.step_interface._extract",
-            side_effect=[input_geometry, matching_geometry],
-        ) as extract:
-            rep = score_step_fcstd(
-                "source.step",
-                "reference.FCStd",
-                "candidate.FCStd",
-                freecad_cmd="/fake/freecadcmd",
-                extract_dir=extract_dir,
-                require_preprocessing=True,
-            )
-
-    assert rep.overall_score == 0
-    assert rep.grade == "invalid"
-    assert rep.gates_triggered == [{"reason": FailureMode.PREPROCESSING_NOT_PERFORMED}]
-    assert len(extract.call_args_list) == 2
-    assert extract.call_args_list[0].kwargs.get("extra_args") is None
-    assert extract.call_args_list[1].kwargs["extra_args"] == ["geometry-only"]
+        ) as extract,
+    ):
+        rep = score_step_fcstd(
+            "source.step",
+            "reference.FCStd",
+            "candidate.FCStd",
+            extract_dir=extract_dir,
+            require_preprocessing=True,
+        )
+    assert rep.overall_score > 0
+    assert not rep.gates_triggered
+    assert rep.subscores_details["preprocessing"]["applicable"] is False
+    assert len(extract.call_args_list) == 4
 
 
 def test_required_preprocessing_changed_geometry_continues_normal_scoring():
     input_geometry = {"volume_mm3": 1.0e6, "surface_area_mm2": 2.5e5}
-    candidate_geometry = {"geometry": {"volume_mm3": 0.75e6, "surface_area_mm2": 2.0e5}}
     preprocessing_label = {
         **LABEL,
-        "geometry": {"volume_mm3": 0.75e6, "characteristic_length_mm": 387.0},
+        "geometry": {**LABEL["geometry"], "volume_mm3": 0.75e6},
     }
-    candidate = _cand(geometry={"volume_mm3": 0.75e6, "characteristic_length_mm": 387.0})
+    candidate = _cand(geometry={**LABEL["geometry"], "volume_mm3": 0.75e6})
     with TemporaryDirectory() as extract_dir:
         with patch(
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
                 input_geometry,
-                candidate_geometry,
                 preprocessing_label,
                 candidate,
                 {"score": 0.5, "reference_changed_body_count": 2, "extra_changed_body_count": 0},
@@ -641,35 +651,29 @@ def test_required_preprocessing_changed_geometry_continues_normal_scoring():
         failure["code"] == FailureMode.GEOMETRY_MISMATCH for failure in rep.failure_modes_detected
     )
     assert any("reference FCStd geometry target" in item for item in rep.evidence)
-    assert len(extract.call_args_list) == 5
+    assert len(extract.call_args_list) == 4
     assert extract.call_args_list[0].kwargs.get("extra_args") is None
-    assert extract.call_args_list[1].kwargs["extra_args"] == ["geometry-only"]
     assert extract.call_args_list[-2].kwargs["extra_args"] == ["verify-solve"]
     assert rep.subscores_details["preprocessing"]["multiplier"] == 0.5
 
 
-def test_corrupt_candidate_is_scored_zero_after_trusted_inputs_extract():
-    with TemporaryDirectory() as extract_dir:
-        with patch(
+def test_candidate_worker_error_remains_evaluation_error():
+    with (
+        TemporaryDirectory() as extract_dir,
+        patch(
             "freecad_validator.fem.step_interface._extract",
             side_effect=[STEP, LABEL, ExtractionError("candidate FCStd is corrupt")],
-        ) as extract:
-            rep = score_step_fcstd(
-                "source.step",
-                "reference.FCStd",
-                "candidate.FCStd",
-                freecad_cmd="/fake/freecadcmd",
-                extract_dir=extract_dir,
+        ) as extract,
+    ):
+        with pytest.raises(ExtractionError, match="candidate FCStd is corrupt"):
+            score_step_fcstd(
+                "source.step", "reference.FCStd", "candidate.FCStd", extract_dir=extract_dir
             )
-
-    assert rep.overall_score == 0
-    assert rep.grade == "invalid"
     assert [call.args[2] for call in extract.call_args_list] == [
         "source.step",
         "reference.FCStd",
         "candidate.FCStd",
     ]
-    assert any("candidate FCStd is corrupt" in evidence for evidence in rep.evidence)
 
 
 def test_candidate_no_result_payload_is_scored_zero():
@@ -861,6 +865,17 @@ def test_adapter_import_does_not_initialize_package(tmp_path):
         "class FemToolsCcx:\n    pass\n",
         encoding="utf-8",
     )
+    for package, module, functions in (
+        ("femmesh", "meshtools", ["sub_shape_at_global_placement"]),
+        ("feminout", "importCcxFrdResults", ["read_frd_result"]),
+        ("femresult", "resulttools", ["calculate_principal_stress_std", "calculate_von_mises"]),
+    ):
+        directory = tmp_path / package
+        directory.mkdir()
+        (directory / (module + ".py")).write_text(
+            "\n".join(f"def {name}(*args): pass" for name in functions),
+            encoding="utf-8",
+        )
     env = {"PYTHONPATH": str(tmp_path), "PATH": ""}
     completed = subprocess.run(
         [sys.executable, FCSTD_ADAPTER, "import-check"],
@@ -982,7 +997,8 @@ def test_decimal_ratio_preserves_exact_budget_boundary(nodes):
     reference = {**LABEL, "mesh": {"num_nodes": 50000, "num_elements": 12000}}
     candidate = _cand(mesh={"num_nodes": nodes, "num_elements": 12000})
     report = score_trusted_payloads(STEP, reference, candidate, mesh_budget_zero_ratio=1.1)
-    assert report.overall_score == (100.0 if nodes == 55000 else 0.0)
+    assert report.subscores["mesh_budget"] == (100.0 if nodes == 55000 else 0.0)
+    assert (report.overall_score > 0) is (nodes == 55000)
     assert any("cap=55000 nodes" in item for item in report.evidence)
     assert bool(report.gates_triggered) is (nodes > 55000)
 
@@ -1041,13 +1057,14 @@ def test_material_counts_are_compared_independently_of_first_material():
     reference = {**LABEL, "materials": [steel, aluminum]}
     candidate = _cand(material=aluminum, materials=[aluminum, steel])
     report = score_trusted_payloads(STEP, reference, candidate)
-    assert report.subscores["problem_setup"] == 100
+    assert report.subscores_details["problem_setup"]["components"]["materials"] == 1
     assert not report.gates_triggered
 
     candidate["materials"] = [{**aluminum, "body_count": 3}, {**steel, "body_count": 2}]
     report = score_trusted_payloads(STEP, reference, candidate)
-    assert report.overall_score == 0
-    assert any(f["code"] == FailureMode.WRONG_MATERIAL for f in report.failure_modes_detected)
+    assert report.overall_score > 0
+    assert report.subscores_details["problem_setup"]["components"]["materials"] < 1
+    assert any(f["code"] == "SETUP_MISMATCH" for f in report.failure_modes_detected)
 
 
 @pytest.mark.parametrize(
@@ -1075,7 +1092,7 @@ def test_every_material_card_must_be_physically_admissible(property_name, invali
     assert any(
         finding["category"] == "physical_validity"
         and finding["code"] == FailureMode.PHYSICALLY_IMPOSSIBLE
-        and "Material 2" in finding["evidence"]
+        and "Material 2" in finding["message"]
         for finding in report.failure_modes_detected
     )
 
@@ -1084,12 +1101,17 @@ def test_missing_material_counts_cannot_bypass_new_reference_check():
     report = score_trusted_payloads(
         STEP, {**LABEL, "materials": [{**LABEL["material"], "body_count": 1}]}, _cand()
     )
-    assert report.overall_score == 0
-    assert any(f["code"] == FailureMode.WRONG_MATERIAL for f in report.failure_modes_detected)
+    assert 0 < report.overall_score < 100
+    assert 0 < report.subscores["problem_setup"] < 100
+    assert not report.gates_triggered
+    assert report.pass_fail_flags["setup_correct"] is False
 
 
 def test_tolerated_material_reordering_does_not_zero_a_correct_submission():
-    materials = [{"E_MPa": 200000.0, "body_count": 1}, {"E_MPa": 210000.0, "body_count": 2}]
+    materials = [
+        {"E_MPa": 200000.0, "body_count": 1, "nu": 0.3},
+        {"E_MPa": 210000.0, "body_count": 2, "nu": 0.3},
+    ]
     candidate = [dict(materials[0]), {**materials[1], "E_MPa": 190000.0}]
     report = score_trusted_payloads(
         STEP, {**LABEL, "materials": materials}, _cand(materials=candidate)
@@ -1106,14 +1128,14 @@ def test_tolerated_material_reordering_does_not_zero_a_correct_submission():
         {"nu": 0.31},
     ],
 )
-def test_partial_material_variation_scores_like_uniform_variation(changes):
+def test_material_variation_receives_continuous_credit(changes):
     material = {**LABEL["material"], "rho_kg_m3": 7900.0, "body_count": 1}
     reference = {**LABEL, "materials": [material, material]}
     baseline = score_trusted_payloads(STEP, reference, _cand(materials=[material, material]))
     for cards in ([material, {**material, **changes}], [{**material, **changes}] * 2):
         report = score_trusted_payloads(STEP, reference, _cand(materials=cards))
-        assert report.overall_score == baseline.overall_score
-        assert report.subscores["problem_setup"] == 100
+        assert 0 < report.overall_score < baseline.overall_score
+        assert report.subscores["problem_setup"] < baseline.subscores["problem_setup"]
         assert not report.gates_triggered
 
 
@@ -1212,7 +1234,6 @@ def test_required_preprocessing_face_partition_continues_to_solver_verification(
             "freecad_validator.fem.step_interface._extract",
             side_effect=[
                 source,
-                {"geometry": prepared},
                 label,
                 candidate,
                 {"score": None, "reference_changed_body_count": 0, "extra_changed_body_count": 0},
@@ -1229,6 +1250,6 @@ def test_required_preprocessing_face_partition_continues_to_solver_verification(
 
     assert report.overall_score > 0
     assert report.gates_triggered == []
-    assert len(extract.call_args_list) == 5
+    assert len(extract.call_args_list) == 4
     assert extract.call_args_list[-2].kwargs["extra_args"] == ["verify-solve"]
     assert any("reference FCStd geometry target" in item for item in report.evidence)

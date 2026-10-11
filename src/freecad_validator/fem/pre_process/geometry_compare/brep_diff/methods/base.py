@@ -13,7 +13,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import replace
 
-from freecad_validator.fem.pre_process.errors import EvaluationError
+from freecad_validator.fem.errors import EvaluationError
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.geometry_ops import (
     classify_from_matches,
 )

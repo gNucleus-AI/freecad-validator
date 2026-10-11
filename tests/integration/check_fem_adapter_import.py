@@ -24,6 +24,17 @@ def main():
             "class FemToolsCcx:\n    pass\n",
             encoding="utf-8",
         )
+        for package, module, functions in (
+            ("femmesh", "meshtools", ["sub_shape_at_global_placement"]),
+            ("feminout", "importCcxFrdResults", ["read_frd_result"]),
+            ("femresult", "resulttools", ["calculate_principal_stress_std", "calculate_von_mises"]),
+        ):
+            directory = stubs / package
+            directory.mkdir()
+            (directory / (module + ".py")).write_text(
+                "\n".join(f"def {name}(*args): pass" for name in functions),
+                encoding="utf-8",
+            )
         env = os.environ.copy()
         env["PYTHONPATH"] = str(stubs)
         completed = subprocess.run(
