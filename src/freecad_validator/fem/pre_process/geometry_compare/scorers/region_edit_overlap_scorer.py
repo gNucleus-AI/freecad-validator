@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import FreeCAD
-
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.geometry_ops import (
     document_scale,
     linear_tolerance,
@@ -17,12 +15,19 @@ from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import 
     BrepDocument,
     DiffResult,
 )
+from freecad_validator.fem.pre_process.geometry_compare.sampling import (
+    _halton_points,
+    _inside_many,
+    point_in_bounds,
+)
 from freecad_validator.fem.pre_process.geometry_compare.scorers.scorer_base import (
     BaseScorer,
     ScoreResult,
     cached_diff,
     load_shape,
 )
+from freecad_validator.fem.pre_process.occt_solid_occupancy import solid_occupancies
+from freecad_validator.fem.pre_process.spatial import shape_bounds
 
 BBOX_PAD_FRACTION = 0.01
 
@@ -86,37 +91,6 @@ def _pad_bbox(
     return tuple(padded_min), tuple(padded_max)
 
 
-def _van_der_corput(index: int, base: int) -> float:
-    value = 0.0
-    denominator = 1.0
-    while index:
-        index, remainder = divmod(index, base)
-        denominator *= base
-        value += remainder / denominator
-    return value
-
-
-def _halton_points(
-    count: int,
-    bbox: tuple[tuple[float, float, float], tuple[float, float, float]],
-) -> list[tuple[float, float, float]]:
-    mins, maxs = bbox
-    sizes = tuple(maxs[axis] - mins[axis] for axis in range(3))
-    points: list[tuple[float, float, float]] = []
-    for index in range(1, count + 1):
-        unit = (
-            _van_der_corput(index, 2),
-            _van_der_corput(index, 3),
-            _van_der_corput(index, 5),
-        )
-        points.append(tuple(mins[axis] + sizes[axis] * unit[axis] for axis in range(3)))
-    return points
-
-
-def _inside(shape: Any, point: tuple[float, float, float], tolerance: float) -> bool:
-    return bool(shape.isInside(FreeCAD.Vector(*point), tolerance, True))
-
-
 def _occupancy_change_counts(
     points: list[tuple[float, float, float]],
     base_shape: Any,
@@ -128,10 +102,24 @@ def _occupancy_change_counts(
     produced = 0
     overlap = 0
     union = 0
-    for point in points:
-        base_inside = _inside(base_shape, point, tolerance)
-        intended_changed = base_inside != _inside(target_shape, point, tolerance)
-        produced_changed = base_inside != _inside(candidate_shape, point, tolerance)
+    shapes = (base_shape, target_shape, candidate_shape)
+    boxes = [shape_bounds([shape]) if shape is not None else None for shape in shapes]
+    if len(points) >= 4096 and all(hasattr(shape, "exportBrepToString") for shape in shapes):
+        occupancies = solid_occupancies(
+            [shape.exportBrepToString() for shape in shapes], points, tolerance
+        )
+    else:
+        occupancies = [
+            (_inside_many(shape, points, tolerance) if shape is not None else [False] * len(points))
+            for shape in shapes
+        ]
+    for point, states in zip(points, zip(*occupancies, strict=True), strict=True):
+        base_inside, target_inside, candidate_inside = [
+            box is not None and point_in_bounds(point, box, tolerance) and inside
+            for inside, box in zip(states, boxes, strict=True)
+        ]
+        intended_changed = base_inside != target_inside
+        produced_changed = base_inside != candidate_inside
         intended += int(intended_changed)
         produced += int(produced_changed)
         overlap += int(intended_changed and produced_changed)
@@ -160,10 +148,31 @@ class RegionEditOverlapScorer(BaseScorer):
         candidate_doc: BrepDocument,
     ) -> ScoreResult:
         if base_doc is None:
+            scale = max(document_scale(target_doc, candidate_doc), 1.0)
+            tolerance = max(linear_tolerance(self.config, scale), 1e-7)
+            bbox = _pad_bbox(
+                _bbox_from_documents((target_doc, candidate_doc)),
+                max(BBOX_PAD_FRACTION * scale, tolerance),
+            )
+            shapes = [
+                doc._shape if doc._shape is not None else load_shape(doc.path, self.config)
+                for doc in (target_doc, candidate_doc)
+            ]
+            if any(shape is None for shape in shapes):
+                raise ValueError("Missing geometry for required addition comparison")
+            points = _halton_points(self.config.region_sample_count, bbox)
+            counts = _occupancy_change_counts(points, None, *shapes, tolerance)
+            iou = _safe_ratio(counts["overlap"], counts["union"], 0.0)
             return ScoreResult(
-                0.0,
-                "region edit overlap requires a valid base solid",
-                {"iou": 0.0, "precision": 0.0, "recall": 0.0},
+                iou,
+                "Whole-body addition sampled occupied-volume IoU",
+                {"iou": iou},
+                {
+                    "counts": counts,
+                    "sample_count": len(points),
+                    "bbox_min": bbox[0],
+                    "bbox_max": bbox[1],
+                },
             )
 
         method = SampledAssignmentMethod(self.config)
@@ -190,9 +199,10 @@ class RegionEditOverlapScorer(BaseScorer):
         pad = max(BBOX_PAD_FRACTION * scale, linear_tolerance(self.config, scale))
         bbox = _pad_bbox(bbox, pad)
 
-        base_shape = load_shape(base_doc.path)
-        target_shape = load_shape(target_doc.path)
-        candidate_shape = load_shape(candidate_doc.path)
+        base_shape, target_shape, candidate_shape = [
+            doc._shape if doc._shape is not None else load_shape(doc.path, self.config)
+            for doc in (base_doc, target_doc, candidate_doc)
+        ]
         if base_shape is None or target_shape is None or candidate_shape is None:
             return ScoreResult(
                 0.0,

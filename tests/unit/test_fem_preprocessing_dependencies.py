@@ -14,7 +14,7 @@ def test_geometry_runtime_dependency_boundary():
         "Part",
         "numpy",
         "scipy",
-        "manifold3d",
+        "OCP",
         "freecad_validator",
     }
     for path in directory.rglob("*.py"):

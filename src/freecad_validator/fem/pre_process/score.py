@@ -1,20 +1,24 @@
-"""Run with FreeCAD's Python; emit a preprocessing geometry score JSON."""
+"""Evaluate preprocessing geometry with FreeCAD; emit a geometry score JSON."""
 
 import argparse
 import json
 import logging
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
 from freecad_validator.fem.pre_process.assembly import score_assembly
-from freecad_validator.fem.pre_process.errors import BodyCorrespondenceError, CandidateGeometryError
+from freecad_validator.fem.pre_process.errors import (
+    BodyCorrespondenceError,
+    CandidateGeometryError,
+)
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import DiffConfig
 from freecad_validator.fem.pre_process.integration import apply_preprocessing_score
 from freecad_validator.fem.pre_process.scorer import PreProcessScorer
 from freecad_validator.fem.schema import ScoringReport
 
 
-def main(arguments: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw", required=True)
     parser.add_argument("--reference", help="Reference clean STEP or FCStd")
@@ -34,6 +38,25 @@ def main(arguments: list[str] | None = None) -> None:
         type=Path,
         help="Existing verified static FEM report to multiply by task geometry credit",
     )
+    arguments = sys.argv[1:] if argv is None else argv
+    if "--pass" in arguments:
+        # The static adapter supplies raw/output/reference/candidate paths.
+        passed = arguments[arguments.index("--pass") + 1 :]
+        if len(passed) == 4:
+            raw, output, reference, candidate = passed
+            arguments = [
+                "--assembly",
+                "--raw",
+                raw,
+                "--reference",
+                reference,
+                "--candidate",
+                candidate,
+                "--out",
+                output,
+            ]
+        else:
+            parser.error("Expected raw/output/reference/candidate worker arguments")
     args = parser.parse_args(arguments)
     if args.fem_report and not args.assembly:
         parser.error("--fem-report requires --assembly")
@@ -85,5 +108,5 @@ def main(arguments: list[str] | None = None) -> None:
         raise SystemExit(1)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" or "--pass" in sys.argv:
     main()

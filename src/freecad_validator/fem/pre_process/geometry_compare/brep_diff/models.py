@@ -1,4 +1,4 @@
-"""JSON-safe geometry descriptors and correspondence results."""
+"""Geometry descriptors, optional read-only source shapes and comparison results."""
 
 from __future__ import annotations
 
@@ -94,6 +94,7 @@ class BrepDocument:
     edges: tuple[SubshapeRecord, ...]
     vertices: tuple[SubshapeRecord, ...]
     gate_reason: str | None = None
+    _shape: Any = field(default=None, repr=False, compare=False)
 
     def entities(self, kind: str) -> tuple[SubshapeRecord, ...]:
         if kind == "face":

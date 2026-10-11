@@ -6,11 +6,11 @@ Inputs (all required):
 * ``fcstd_path_candidate`` - the solved candidate FCStd to validate.
 
 What it evaluates on the candidate:
-* geometry fidelity     - did the candidate analyse the STEP solid (volume match)?
+* geometry agreement    - does the candidate match the saved reference analysis?
 * accuracy vs reference - candidate result quantities vs the reference values;
-* mesh budget           - candidate element count vs the reference baseline;
+* mesh budget           - saved source-node count against the task ceiling;
 * problem-setup match   - analysis type, material, restraint, and load;
-* physical validity, mesh quality, numerical reliability of the candidate.
+* physical validity and numerical reliability of the candidate.
 
 Returns a ``ScoringReport`` (the standard type): overall 0-100, per-category
 sub-scores, pass/fail flags, detected failure modes, numerical comparison table
@@ -18,8 +18,9 @@ sub-scores, pass/fail flags, detected failure modes, numerical comparison table
 
 A raw FCStd carries no convergence study or written report, so those categories
 are weighted out. Accuracy-vs-reference is the largest single weight; a gross miss on
-the critical quantity caps the score (a failed reproduction); a geometry mismatch
-or a physically impossible result hard-caps the score regardless.
+the critical quantity gates the score. Setup receives continuous agreement credit;
+critical physical or numerical failures gate the total. Mesh quality receives no
+points in this reference-based path. The generic score_result API is unchanged.
 """
 
 from __future__ import annotations
@@ -33,8 +34,13 @@ from pathlib import Path
 from typing import Any
 
 from freecad_validator._freecad_loader import resolve_freecad_command
+from freecad_validator.fem.errors import ExtractionError as ExtractionError
+from freecad_validator.fem.label_scoring import score_label_submission, validate_reference
 from freecad_validator.fem.mesh_budget import default_node_cap
-from freecad_validator.fem.pre_process.integration import apply_preprocessing_score
+from freecad_validator.fem.pre_process.integration import (
+    apply_preprocessing_evaluation,
+    apply_preprocessing_score,
+)
 from freecad_validator.fem.schema import (
     DISP_TOL,
     GROSS_TOL,
@@ -45,7 +51,6 @@ from freecad_validator.fem.schema import (
     ScoringReport,
     Submission,
 )
-from freecad_validator.fem.scorer import score_result
 from freecad_validator.fem.topology_compare import (
     TOPOLOGY_FIELDS as BOOLEAN_TOPOLOGY_FIELDS,
 )
@@ -63,10 +68,6 @@ HERE = Path(__file__).resolve().parent
 FCSTD_ADAPTER = str(HERE / "adapters" / "fcstd.py")
 STEP_ADAPTER = str(HERE / "adapters" / "step.py")
 PREPROCESSING_ADAPTER = str(HERE / "adapters" / "pre_process.py")
-
-
-class ExtractionError(RuntimeError):
-    """An adapter could not produce a valid extraction payload."""
 
 
 class RuntimeEnvironmentError(ExtractionError):
@@ -242,10 +243,10 @@ def _boolean_gate_report(
 STEP_WEIGHTS = {
     "accuracy_vs_reference": 0.35,
     "mesh_budget": 0.25,  # positive solved-node count at or below the task cap
-    "problem_setup": 0.15,  # incl. geometry fidelity + analysis/material/BC/load match
+    "problem_setup": 0.20,  # incl. geometry fidelity + analysis/material/BC/load match
     "physical_validity": 0.15,
     "numerical_reliability": 0.05,
-    "mesh_quality": 0.05,
+    "mesh_quality": 0.0,
     "engineering_reporting": 0.0,
 }
 
@@ -349,6 +350,9 @@ def score_trusted_payloads(
     from validator-controlled adapters or equivalent protected code. Never pass
     candidate-controlled JSON here; replay-verification fields are trusted.
     """
+    validate_reference(reference_sub)
+    target_geom = reference_sub["geometry"]
+    geometry_source = "reference FCStd geometry"
     case = build_case(
         target_geom,
         reference_sub,
@@ -359,7 +363,7 @@ def score_trusted_payloads(
         max_node_count=max_node_count,
     )
     sub = Submission.from_dict({**candidate_sub, "case_id": case.case_id})
-    report = score_result(case, sub)
+    report = score_label_submission(case, reference_sub, candidate_sub)
 
     report.evidence.insert(
         0,
@@ -565,48 +569,6 @@ def _score_step_fcstd(
         os.path.join(extract_dir, f"{tag}_step.json"),
         timeout_seconds=timeout_seconds,
     )
-    reference_geometry_payload = None
-    if require_boolean:
-        reference_geometry_payload = _extract(
-            fc,
-            FCSTD_ADAPTER,
-            fcstd_path_reference,
-            os.path.join(extract_dir, f"{tag}_boolean_reference.json"),
-            extra_args=["geometry-only"],
-            timeout_seconds=timeout_seconds,
-        )
-    candidate_geometry_payload = None
-    if require_preprocessing or require_boolean:
-        candidate_geometry_payload = _extract(
-            fc,
-            FCSTD_ADAPTER,
-            fcstd_path_candidate,
-            os.path.join(extract_dir, f"{tag}_required_geometry_candidate.json"),
-            extra_args=["geometry-only"],
-            timeout_seconds=timeout_seconds,
-        )
-    if require_preprocessing:
-        if candidate_geometry_payload is None:
-            raise ExtractionError("candidate geometry extraction was not performed")
-        gate_report = _preprocessing_gate_report(
-            step_geom,
-            candidate_geometry_payload.get("geometry") or {},
-        )
-        if gate_report is not None:
-            gate_report.runtime_provenance = dict(runtime_provenance)
-            return gate_report
-    if require_boolean:
-        if reference_geometry_payload is None or candidate_geometry_payload is None:
-            raise ExtractionError("Boolean geometry extraction was not performed")
-        gate_report = _boolean_gate_report(
-            step_geom,
-            reference_geometry_payload.get("geometry") or {},
-            candidate_geometry_payload.get("geometry") or {},
-        )
-        if gate_report is not None:
-            gate_report.runtime_provenance = dict(runtime_provenance)
-            return gate_report
-
     reference = _extract(
         fc,
         FCSTD_ADAPTER,
@@ -617,17 +579,15 @@ def _score_step_fcstd(
     if reference.get("no_result"):
         reason = reference.get("extraction_error") or "no FEM result object found"
         raise ExtractionError(f"reference FCStd contains no loaded FEM result: {reason}")
-    try:
-        candidate = _extract(
-            fc,
-            FCSTD_ADAPTER,
-            fcstd_path_candidate,
-            os.path.join(extract_dir, f"{tag}_candidate.json"),
-            extra_args=["verify-solve"],
-            timeout_seconds=timeout_seconds,
-        )
-    except ExtractionError as exc:
-        candidate = _failed_candidate(str(exc))
+    validate_reference(reference)
+    candidate = _extract(
+        fc,
+        FCSTD_ADAPTER,
+        fcstd_path_candidate,
+        os.path.join(extract_dir, f"{tag}_candidate.json"),
+        extra_args=["verify-solve"],
+        timeout_seconds=timeout_seconds,
+    )
     if candidate.get("no_result"):
         reason = candidate.get("extraction_error") or "no FEM result object found"
         candidate = _failed_candidate(reason)
@@ -664,25 +624,7 @@ def _score_step_fcstd(
             ],
             timeout_seconds=timeout_seconds,
         )
-        if geometry_report.get("status") == "evaluation_error":
-            raise ExtractionError(
-                f"Preprocessing evaluation failed: {geometry_report.get('error')}"
-            )
-        if geometry_report.get("status") == "candidate_invalid":
-            combined = apply_preprocessing_score(report, 0.0)
-            combined.evidence.append(
-                f"preprocessing_candidate_invalid: {geometry_report.get('error')}"
-            )
-            return combined
-        if "score" not in geometry_report or "reference_changed_body_count" not in geometry_report:
-            raise ExtractionError("Preprocessing worker did not return a task geometry score")
-        geometry_score = geometry_report["score"]
-        if geometry_score is None and (
-            geometry_report["reference_changed_body_count"] != 0
-            or geometry_report.get("extra_changed_body_count") != 0
-        ):
-            raise ExtractionError("Preprocessing worker returned no score for changed bodies")
-        return apply_preprocessing_score(report, geometry_score)
+        return apply_preprocessing_evaluation(report, geometry_report)
     return report
 
 

@@ -66,7 +66,6 @@ def test_no_double_multiplication():
 def test_existing_flag_alone_enables_automatic_multiplier(tmp_path):
     raw = {**STEP, "volume_mm3": 2e6, "surface_area_mm2": 1e5}
     candidate = _cand()
-    prepared = {"geometry": {**candidate["geometry"], "surface_area_mm2": 5e4}}
     geometry = {
         "score": 0.75,
         "reference_changed_body_count": 4,
@@ -75,7 +74,7 @@ def test_existing_flag_alone_enables_automatic_multiplier(tmp_path):
     }
     with patch(
         "freecad_validator.fem.step_interface._extract",
-        side_effect=[raw, prepared, LABEL, candidate, geometry],
+        side_effect=[raw, LABEL, candidate, geometry],
     ) as extract:
         report = score_step_fcstd(
             "raw.step",
@@ -96,12 +95,10 @@ def test_existing_flag_alone_enables_automatic_multiplier(tmp_path):
 
 def test_invalid_candidate_geometry_is_zero_with_reason(tmp_path):
     raw = {**STEP, "volume_mm3": 2e6, "surface_area_mm2": 1e5}
-    prepared = {"geometry": {**LABEL["geometry"], "surface_area_mm2": 5e4}}
     with patch(
         "freecad_validator.fem.step_interface._extract",
         side_effect=[
             raw,
-            prepared,
             LABEL,
             _cand(),
             {"status": "candidate_invalid", "score": 0.0, "error": "No analysis solids"},
@@ -131,10 +128,9 @@ def test_invalid_candidate_geometry_is_zero_with_reason(tmp_path):
 )
 def test_missing_worker_score_is_not_full_credit(tmp_path, payload):
     raw = {**STEP, "volume_mm3": 2e6, "surface_area_mm2": 1e5}
-    prepared = {"geometry": {**LABEL["geometry"], "surface_area_mm2": 5e4}}
     with patch(
         "freecad_validator.fem.step_interface._extract",
-        side_effect=[raw, prepared, LABEL, _cand(), payload],
+        side_effect=[raw, LABEL, _cand(), payload],
     ):
         with pytest.raises(ExtractionError):
             score_step_fcstd(

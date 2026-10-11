@@ -480,7 +480,7 @@ def _add_fem_score_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--require-boolean",
         action="store_true",
-        help="require the explicit minimum Boolean topology contract",
+        help="retain compatibility; Boolean topology is included in continuous setup agreement",
     )
     p.add_argument(
         "--timeout",

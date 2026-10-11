@@ -1,23 +1,12 @@
-"""Select and export solid geometry for preprocessing comparisons (FreeCAD runtime)."""
+"""Read solid geometry for preprocessing comparisons without modifying its BRep."""
 
-import logging
 from pathlib import Path
 
 import FreeCAD
 import Part
 
-from freecad_validator.fem.pre_process.errors import EvaluationError
-
-
-def refine_geometry(shape):
-    """Refinement is optional; valid occupied geometry must survive its failure."""
-    try:
-        return shape.removeSplitter()
-    except Part.OCCError:
-        if not shape.isValid():
-            raise
-        logging.info("Keeping valid geometry whose splitter removal failed")
-        return shape.copy()
+from freecad_validator.fem.errors import EvaluationError
+from freecad_validator.fem.pre_process.spatial import SpatialShape
 
 
 def read_geometry(path: str | Path, object_name: str | None = None):
@@ -60,13 +49,13 @@ def read_geometry(path: str | Path, object_name: str | None = None):
                         )
                     obj = roots[0]
             if isinstance(obj, Part.Shape):
-                shape = obj.copy()
+                shape = obj
             else:
                 shape = Part.getShape(
                     obj,
                     mat=obj.getGlobalPlacement().Matrix,
                     transform=False,
-                ).copy()
+                )
         finally:
             FreeCAD.closeDocument(doc.Name)
     else:
@@ -74,28 +63,5 @@ def read_geometry(path: str | Path, object_name: str | None = None):
 
     if shape.isNull() or not shape.Solids or not shape.isValid() or shape.Volume <= 0:
         raise EvaluationError(f"Input must contain valid, nonempty solid geometry: {path}")
-    # Score occupied material, not CompSolid/Compound packaging or internal split faces.
     solids = shape.Solids
-    shape = solids[0].fuse(solids[1:]) if len(solids) > 1 else solids[0]
-    shape = refine_geometry(shape)
-    if shape.isNull() or not shape.Solids or not shape.isValid() or shape.Volume <= 0:
-        raise EvaluationError(f"Could not form a valid geometric union: {path}")
-    return shape
-
-
-def export_geometry(shape, path: Path) -> None:
-    """Write one detached feature for unambiguous geometry extraction."""
-    doc = FreeCAD.newDocument("PreProcessGeometry")
-    preferences = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Document")
-    previous_binary_brep = preferences.GetBool("SaveBinaryBrep", False)
-    try:
-        obj = doc.addObject("Part::Feature", "Geometry")
-        obj.Shape = shape
-        doc.recompute()
-        # OCCT's legacy ASCII BRep writer can lose valid partitioned surfaces.
-        # Scratch geometry must survive reopening before it can be scored.
-        preferences.SetBool("SaveBinaryBrep", True)
-        doc.saveAs(str(path))
-    finally:
-        preferences.SetBool("SaveBinaryBrep", previous_binary_brep)
-        FreeCAD.closeDocument(doc.Name)
+    return SpatialShape(solids) if len(solids) > 1 else solids[0]

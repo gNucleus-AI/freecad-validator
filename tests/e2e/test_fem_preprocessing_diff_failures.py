@@ -11,11 +11,10 @@ pytestmark = pytest.mark.needs_freecad
 FreeCAD = pytest.importorskip("FreeCAD")
 if not getattr(FreeCAD, "__file__", None):
     pytest.skip("Requires real FreeCAD bindings", allow_module_level=True)
-pytest.importorskip("manifold3d")
 import Part  # noqa: E402
+from fem_geometry_fixtures import export_geometry  # noqa: E402
 
 from freecad_validator.fem.pre_process.errors import EvaluationError  # noqa: E402
-from freecad_validator.fem.pre_process.geometry import export_geometry  # noqa: E402
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.methods.sampled_assignment import (  # noqa: E402
     SampledAssignmentMethod,
 )
@@ -86,7 +85,7 @@ def test_successful_empty_diff_retains_full_region_credit(docs):
     assert result.score == 1.0
 
 
-def test_diff_failure_reaches_worker_without_fem_reward(tmp_path, shapes, monkeypatch):
+def test_fidelity_bound_skips_unneeded_worker_diff(tmp_path, shapes, monkeypatch):
     raw = tmp_path / "raw.step"
     shapes[0].exportStep(str(raw))
     paths = []
@@ -134,11 +133,10 @@ def test_diff_failure_reaches_worker_without_fem_reward(tmp_path, shapes, monkey
             str(output),
         ],
     )
-    with pytest.raises(SystemExit) as caught:
-        main()
-    assert caught.value.code == 1
+    main()
+    SampledAssignmentMethod.run.assert_not_called()
     report = json.loads(output.read_text())
-    assert report["status"] == "evaluation_error"
-    assert "injected worker diff failure" in report["error"]
-    assert not {"score", "overall_score", "reward", "fem_report"}.intersection(report)
+    assert report["geometry"]["score"] == 0
+    assert report["reward"] == 0
+    assert report["overall_score"] == 0
     assert fem.read_bytes() == original_fem

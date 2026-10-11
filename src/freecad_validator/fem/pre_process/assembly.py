@@ -1,74 +1,87 @@
 """Automatic original-body correspondence for saved preprocessing assemblies.
 
-Prefer verified saved pre-Boolean inputs. When those are unavailable, regroup
-the actual analysis fragments into original bodies. Names, labels and visibility
-are not correspondence evidence; all geometry stays in world coordinates.
+Require verified saved pre-Boolean clean bodies. Never reconstruct bodies from
+analysis fragments or fused results. Names, labels and visibility are not
+correspondence evidence; all geometry stays in world coordinates.
 """
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import FreeCAD
 import numpy as np
 import Part
 from scipy.optimize import linear_sum_assignment
 
-from freecad_validator.fem.analysis_context import (
+from freecad_validator.fem.errors import EvaluationError
+from freecad_validator.fem.freecad_io import (
     _is_result_object,
     find_replay_context,
 )
 from freecad_validator.fem.pre_process.errors import (
     BodyCorrespondenceError,
     CandidateGeometryError,
-    EvaluationError,
+    MissingCleanBodiesError,
 )
-from freecad_validator.fem.pre_process.geometry import export_geometry, refine_geometry
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.geometry_ops import (
-    linear_tolerance,
-)
-from freecad_validator.fem.pre_process.geometry_compare.brep_diff.methods.mesh_boolean import (
-    tessellate_shape,
-    to_manifold,
+    sample_tolerance,
 )
 from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import DiffConfig
-from freecad_validator.fem.pre_process.geometry_compare.scorers.region_edit_overlap_scorer import (
+from freecad_validator.fem.pre_process.geometry_compare.sampling import (
     _halton_points,
     _inside,
+    _inside_many,
+    point_in_bounds,
 )
 from freecad_validator.fem.pre_process.policy import aggregate_body_scores, score_body_edit
+from freecad_validator.fem.pre_process.spatial import (
+    SpatialShape,
+    sampled_surfaces_match,
+    shape_bounds,
+)
 
 
 @dataclass
 class BodyGeometry:
     shape: object
     source: str
+    _probe_batches: list = field(default_factory=list, init=False, repr=False, compare=False)
 
     @cached_property
-    def mesh(self):
-        # This coarse mesh finds correspondence only; body scoring uses its own
-        # established tolerances and changed-region samples, not these overlaps.
-        try:
-            # OCCT refinement can mutate shared input surfaces even when the
-            # returned shape is valid. Preserve the body used for later scoring.
-            mesh = to_manifold(*tessellate_shape(self.shape.copy().removeSplitter(), 0.05))
-        except Part.OCCError:
-            # Refinement/tessellation can fail on valid saved Boolean regions.
-            # Correspondence can still use exact CAD intersections below.
-            return None
-        if mesh.is_empty() or mesh.volume() <= 0:
-            return None
-        return mesh
+    def bounds(self):
+        return shape_bounds([self.shape])
+
+    def _matching_batches(self):
+        """Extend one deterministic probe sequence, reusing it across body pairs."""
+        box = self.bounds
+        bounds = ((box.XMin, box.YMin, box.ZMin), (box.XMax, box.YMax, box.ZMax))
+        previous, count, index = 0, 256, 0
+        while count <= 65536:
+            if index == len(self._probe_batches):
+                points = _halton_points(count, bounds)[previous:]
+                occupied = [
+                    point
+                    for point, inside in zip(
+                        points,
+                        _inside_many(self.shape, points, 0.0),
+                        strict=True,
+                    )
+                    if inside
+                ]
+                self._probe_batches.append(occupied)
+            yield self._probe_batches[index], count
+            previous, count, index = count, count * 2, index + 1
 
 
 def world_shape(obj):
+    """Retain saved topology for read-only queries; deep copies can change validity."""
     shape = getattr(obj, "Shape", None)
     if isinstance(shape, Part.Shape) and shape.isNull():
-        return shape.copy()
-    return Part.getShape(obj, mat=obj.getGlobalPlacement().Matrix, transform=False).copy()
+        return shape
+    return Part.getShape(obj, mat=obj.getGlobalPlacement().Matrix, transform=False)
 
 
 def solid_bodies(shape, source, error_type=EvaluationError):
@@ -78,7 +91,7 @@ def solid_bodies(shape, source, error_type=EvaluationError):
     for index, solid in enumerate(shape.Solids):
         if not solid.isValid() or solid.Volume <= 0:
             raise error_type(f"Invalid solid {index + 1} in {source}")
-        bodies.append(BodyGeometry(solid.copy(), f"{source}/Solid{index + 1}"))
+        bodies.append(BodyGeometry(solid, f"{source}/Solid{index + 1}"))
     return bodies
 
 
@@ -91,8 +104,8 @@ def read_raw_bodies(path):
     return solid_bodies(shape, str(path))
 
 
-def boolean_input_objects(feature):
-    """Read input links only; do not inspect or validate the Boolean result."""
+def saved_clean_input_objects(feature):
+    """Read saved clean-input links without executing the feature."""
     properties = set(feature.PropertiesList)
     if "PreprocessingInputs" in properties:
         return list(feature.PreprocessingInputs)
@@ -108,7 +121,7 @@ def boolean_input_objects(feature):
     return None
 
 
-def linked_boolean_inputs(feature, role):
+def linked_clean_inputs(feature, role):
     """Follow saved links through wrappers, stopping at the nearest input set."""
     pending = [feature]
     visited = set()
@@ -119,7 +132,7 @@ def linked_boolean_inputs(feature, role):
             if obj.Name in visited:
                 continue
             visited.add(obj.Name)
-            inputs = boolean_input_objects(obj)
+            inputs = saved_clean_input_objects(obj)
             if inputs is not None:
                 key = tuple(sorted(item.Name for item in inputs if item is not None))
                 found[key] = inputs
@@ -143,56 +156,48 @@ def same_solid_geometry(left, right):
         return False
     if (left.CenterOfMass - right.CenterOfMass).Length > 1e-6:
         return False
-    return left.cut(right).Volume + right.cut(left).Volume <= tolerance
-
-
-def sampled_material_is_covered(sources, targets):
-    """Check one direction of union occupancy using the existing region sampler.
-
-    Sample each solid separately so small parts are not lost in assembly-wide
-    probes. Union occupancy is logical OR, including overlapping input solids;
-    no CAD/mesh Boolean or geometric reconstruction is performed here.
-    Require at least 64 occupied probes and cap sampling at 65,536.
-    Insufficient coverage is an error, never a match.
-    """
+    scale = max(left.BoundBox.DiagonalLength, right.BoundBox.DiagonalLength, 1.0)
     config = DiffConfig()
-    target_boxes = [(body.shape, body.shape.BoundBox) for body in targets]
-    for body in sources:
-        box = body.shape.BoundBox
-        bounds = ((box.XMin, box.YMin, box.ZMin), (box.XMax, box.YMax, box.ZMax))
-        tolerance = linear_tolerance(config, max(box.DiagonalLength, 1.0))
-        nearby = [(shape, other) for shape, other in target_boxes if box.intersect(other)]
-        occupied = 0
-        previous_count = 0
-        count = config.region_sample_count
-        while True:
-            for point in _halton_points(count, bounds)[previous_count:]:
-                if not _inside(body.shape, point, tolerance):
-                    continue
-                occupied += 1
-                x, y, z = point
-                if not any(
-                    other.XMin - tolerance <= x <= other.XMax + tolerance
-                    and other.YMin - tolerance <= y <= other.YMax + tolerance
-                    and other.ZMin - tolerance <= z <= other.ZMax + tolerance
-                    and _inside(shape, point, tolerance)
-                    for shape, other in nearby
-                ):
-                    logging.info("Saved-input occupancy mismatch in %s at %s", body.source, point)
-                    return False
-            if occupied >= 64:
-                break
-            if count >= 65536:
-                raise ValueError(f"Insufficient occupied probes for {body.source}: {occupied}")
-            previous_count, count = count, min(count * 4, 65536)
-    return bool(sources and targets)
+    return sampled_surfaces_match(left, right, config, sample_tolerance(config, scale))
 
 
 def history_matches_analysis(inputs, analyzed):
-    """Bidirectional sampled occupancy; face splits and seams are irrelevant."""
-    return sampled_material_is_covered(inputs, analyzed) and sampled_material_is_covered(
-        analyzed, inputs
+    """Coarsely verify saved inputs with whole-assembly sampled IoU >= 0.95.
+
+    Both occupied unions are queried on the same Halton points. Overlapping
+    solids count once; neither a Boolean shape nor a per-body score is built.
+    Small local differences may pass this precheck by design. Insufficient
+    occupied samples remain an evaluation error, never an assumed match.
+    """
+    if not inputs or not analyzed:
+        return False
+    prepared = SpatialShape(body.shape for body in inputs)
+    actual = SpatialShape(body.shape for body in analyzed)
+    box = shape_bounds((prepared, actual))
+    bounds = ((box.XMin, box.YMin, box.ZMin), (box.XMax, box.YMax, box.ZMax))
+    config = DiffConfig()
+    occupied, intersection, previous = 0, 0, 0
+    count = config.region_sample_count
+    while True:
+        for point in _halton_points(count, bounds)[previous:]:
+            in_prepared = _inside(prepared, point, 0.0)
+            in_actual = _inside(actual, point, 0.0)
+            occupied += in_prepared or in_actual
+            intersection += in_prepared and in_actual
+        if occupied >= 64:
+            break
+        if count == 65536:
+            raise ValueError(f"Insufficient occupied probes for saved-input IoU: {occupied}")
+        previous, count = count, min(count * 4, 65536)
+    iou = intersection / occupied
+    logging.info(
+        "Saved-input sampled IoU: %.6f (%d intersection / %d union; %d probes)",
+        iou,
+        intersection,
+        occupied,
+        count,
     )
+    return iou >= 0.95
 
 
 def verify_clean_inputs(bodies, analyzed, role):
@@ -206,8 +211,10 @@ def verify_clean_inputs(bodies, analyzed, role):
             role,
         ) from exc
     if mismatch:
-        error_type = CandidateGeometryError if role == "candidate" else EvaluationError
-        raise error_type("Saved clean inputs do not match the actual analysis geometry")
+        raise MissingCleanBodiesError(
+            "Saved clean inputs do not match the actual analysis geometry",
+            role,
+        )
 
 
 def detached_clean_bodies(doc, analysis, raw, path, role, error_type):
@@ -227,7 +234,7 @@ def detached_clean_bodies(doc, analysis, raw, path, role, error_type):
             excluded.update(obj.Name for obj in parent.OutListRecursive)
     # Recognizable Boolean outputs elsewhere in the document are not inputs.
     for obj in doc.Objects:
-        if boolean_input_objects(obj) is not None:
+        if saved_clean_input_objects(obj) is not None:
             excluded.update(item.Name for item in [obj, *obj.InListRecursive])
     objects = [
         obj
@@ -275,31 +282,11 @@ def detached_clean_bodies(doc, analysis, raw, path, role, error_type):
     if raw_groups:
         for name in next(iter(raw_groups)):
             del saved[name]
-    bodies = [body for parts in saved.values() for body in parts]
-    # Alternative saved versions cannot be selected by which one scores better.
-    # Touching parts are allowed; substantially overlapping detached versions
-    # need input links to resolve their provenance.
-    for index, body in enumerate(bodies):
-        for other in bodies[:index]:
-            if not body.shape.BoundBox.intersect(other.shape.BoundBox):
-                continue
-            overlap = body.shape.common(other.shape).Volume
-            if overlap > 0.5 * min(body.shape.Volume, other.shape.Volume):
-                raise BodyCorrespondenceError(
-                    "Ambiguous overlapping detached pre-Boolean objects",
-                    role,
-                )
-    logging.info("Recovered %d detached pre-Boolean bodies from %s", len(bodies), path)
-    return bodies
+    return [body for parts in saved.values() for body in parts]
 
 
 def read_clean_bodies(path, *, candidate=False, raw=None):
-    """Prefer verified saved inputs, then recover from actual analysis regions.
-
-    Legacy documents may retain history away from the mesh dependency chain.
-    Missing or ambiguous detached history falls back to the geometry actually
-    meshed, never to whichever saved objects would earn the best score.
-    """
+    """Read saved clean bodies; missing history never falls back to analysis regions."""
     path = Path(path)
     role = "candidate" if candidate else "reference"
     error_type = CandidateGeometryError if candidate else EvaluationError
@@ -318,22 +305,25 @@ def read_clean_bodies(path, *, candidate=False, raw=None):
         if isinstance(link, tuple):
             link = link[0]
         if link is None or not hasattr(link, "PropertiesList"):
-            raise BodyCorrespondenceError("Missing link to pre-Boolean input objects", role)
+            raise MissingCleanBodiesError("Missing link to saved clean bodies", role)
         analyzed = world_shape(link)
         analyzed_bodies = solid_bodies(analyzed, f"{path}:{link.Name}", error_type)
         # A native single-body model has no assembly Boolean result to unwrap.
-        if link.TypeId in {
-            "Part::Box",
-            "Part::Cylinder",
-            "Part::Sphere",
-            "Part::Cone",
-            "Part::Torus",
-        } or link.isDerivedFrom("PartDesign::Body"):
-            return analyzed_bodies, False
-        inputs = linked_boolean_inputs(link, role)
+        if (
+            raw is not None
+            and len(raw) == 1
+            and analyzed.ShapeType == "Solid"
+            and (
+                link.TypeId
+                in {"Part::Box", "Part::Cylinder", "Part::Sphere", "Part::Cone", "Part::Torus"}
+                or link.isDerivedFrom("PartDesign::Body")
+            )
+        ):
+            return analyzed_bodies
+        inputs = linked_clean_inputs(link, role)
         if inputs is None:
             for feature in doc.Objects:
-                history = boolean_input_objects(feature)
+                history = saved_clean_input_objects(feature)
                 if not history or any(obj is None or obj == link for obj in history):
                     continue
                 bodies = [
@@ -342,7 +332,7 @@ def read_clean_bodies(path, *, candidate=False, raw=None):
                     for body in solid_bodies(world_shape(obj), f"{path}:{obj.Name}", error_type)
                 ]
                 if history_matches_analysis(bodies, analyzed_bodies):
-                    return bodies, False
+                    return bodies
             # Single-part preprocessing may store the prepared solid directly
             # on the mesh feature while retaining the unmodified STEP import.
             # Use that whole solid, not the detached raw copy. Do not unwrap a
@@ -354,24 +344,26 @@ def read_clean_bodies(path, *, candidate=False, raw=None):
                 and not link.OutList
             ):
                 if analyzed.ShapeType == "Solid":
-                    return analyzed_bodies, False
+                    return analyzed_bodies
             bodies = verified_detached_bodies(doc, link, analyzed, raw, path, role, error_type)
             if bodies is not None:
-                return bodies, False
-            logging.info("Recovering original bodies from actual analysis regions in %s", path)
-            return analyzed_bodies, True
+                return bodies
+            raise MissingCleanBodiesError(
+                "No verified independent pre-Boolean clean bodies are saved",
+                role,
+            )
         if not inputs:
-            raise BodyCorrespondenceError(
+            raise MissingCleanBodiesError(
                 "Pre-Boolean input objects are explicitly empty on the selected analysis feature",
                 role,
             )
         bodies = []
         for obj in inputs:
             if obj is None or obj == link:
-                raise BodyCorrespondenceError("Invalid pre-Boolean input link", role)
+                raise MissingCleanBodiesError("Invalid pre-Boolean input link", role)
             bodies.extend(solid_bodies(world_shape(obj), f"{path}:{obj.Name}", error_type))
         verify_clean_inputs(bodies, analyzed, role)
-        return bodies, False
+        return bodies
     finally:
         FreeCAD.closeDocument(doc.Name)
 
@@ -381,12 +373,29 @@ def verified_detached_bodies(doc, link, analyzed, raw, path, role, error_type):
     try:
         bodies = detached_clean_bodies(doc, link, raw, path, role, error_type)
         if bodies:
+            # Reject stale construction history before its costly all-pairs
+            # ownership check. Both checks still apply to accepted history.
             verify_clean_inputs(bodies, analyzed, role)
+            # Touching parts are allowed. Substantially overlapping alternative
+            # versions need explicit links to establish their provenance.
+            overlaps = overlap_matrix(bodies, bodies)
+            for index, body in enumerate(bodies):
+                for other_index, other in enumerate(bodies[:index]):
+                    if overlaps[index, other_index] > 0.5 * min(
+                        body.shape.Volume, other.shape.Volume
+                    ):
+                        raise MissingCleanBodiesError(
+                            "Ambiguous overlapping detached pre-Boolean objects",
+                            role,
+                        )
+            logging.info(
+                "Recovered %d verified detached pre-Boolean bodies from %s", len(bodies), path
+            )
             return bodies
-    except (BodyCorrespondenceError, CandidateGeometryError, EvaluationError) as exc:
-        # Saved construction history is optional. The caller still evaluates
-        # actual analysis geometry, so a rejected history never grants credit.
+    except MissingCleanBodiesError as exc:
+        # Detached objects can be stale history, rather than the saved clean set.
         logging.info("Detached input history unavailable in %s: %s", path, exc)
+        return None
     return None
 
 
@@ -395,20 +404,66 @@ def overlap_matrix(anchors, parts):
     for i, anchor in enumerate(anchors):
         if anchor is None:
             continue
+        if isinstance(anchor.shape, SpatialShape):
+            # Saved disjoint pieces are sparse inside their combined box.
+            # Match their native solids separately, retaining one score owner.
+            pieces = [BodyGeometry(shape, anchor.source) for shape in anchor.shape.parts]
+            overlaps[i] = np.minimum(
+                overlap_matrix(pieces, parts).sum(axis=0), [part.shape.Volume for part in parts]
+            )
+            continue
         for j, part in enumerate(parts):
-            if anchor.shape.BoundBox.intersect(part.shape.BoundBox):
-                if anchor.mesh is not None and part.mesh is not None:
-                    volume = float((anchor.mesh ^ part.mesh).volume())
-                else:
-                    # Some valid STEP solids have non-watertight cached facets.
-                    # Use the CAD intersection for correspondence in that case.
-                    volume = anchor.shape.common(part.shape).Volume
-                overlaps[i, j] = max(0.0, volume)
+            if anchors is parts and j < i:
+                overlaps[i, j] = overlaps[j, i]
+                continue
+            if anchor is part:
+                overlaps[i, j] = anchor.shape.Volume
+                continue
+            if anchor.bounds.intersect(part.bounds):
+                source, target = (
+                    (anchor, part) if anchor.shape.Volume < part.shape.Volume else (part, anchor)
+                )
+                volume = source.shape.Volume
+                # Only refine near decisions still made by the consumers:
+                # correspondence ownership and detached-history ambiguity.
+                thresholds = {
+                    fraction * body.shape.Volume / volume
+                    for fraction in (0.1, 0.5)
+                    for body in (anchor, part)
+                }
+                fraction, _ = sampled_overlap_fraction(source, target, thresholds)
+                overlaps[i, j] = volume * fraction
     return overlaps
 
 
+def sampled_overlap_fraction(source, target, thresholds):
+    """Incrementally refine correspondence near decision thresholds.
+
+    A conservative uncertainty band avoids exhaustive queries for obvious empty
+    or full overlaps. It is a finite-sampling heuristic, not an equivalence proof;
+    final geometry scoring and saved-input verification use their full budgets.
+    """
+    thresholds = [value for value in thresholds if 0 < value < 1]
+    hits, count = 0, 0
+    for points, tested in source._matching_batches():
+        batch = [point for point in points if point_in_bounds(point, target.bounds, 0.0)]
+        hits += sum(_inside_many(target.shape, batch, 0.0))
+        count += len(points)
+        if count < 64:
+            continue
+        center = (hits + 8) / (count + 16)
+        radius = 4 * math.sqrt(hits * (count - hits) / count + 4) / (count + 16)
+        if not any(center - radius <= value <= center + radius for value in thresholds):
+            return hits / count, True
+        # Keep the existing detailed budget; sparse solids may need more box
+        # probes to reach the required number of occupied points.
+        if tested >= 8192:
+            return hits / count, False
+    raise ValueError("Insufficient occupied probes for body correspondence")
+
+
 def descriptor_distance(left, right):
-    """Position-independent fallback for moved parts or failed CAD intersections.
+    """Position-independent fallback for moved parts with no sampled overlap.
 
     Used only for unmatched originals/solids, never to award geometry credit.
     Actual location/orientation is still compared by PreProcessScorer.
@@ -430,170 +485,54 @@ def descriptor_distance(left, right):
     )
 
 
-def partition_fused_part(part, owners, anchors):
-    """Recover original spatial regions when only a fused analysis solid remains.
-
-    Existing material is clipped to each original/reference body. Added connected
-    volumes belong to the body with uniquely greatest shared surface area. If
-    geometry cannot resolve ownership, report an evaluation error instead of
-    awarding assembly-wide credit or counting a fused region as one source body.
-    """
-    pieces = {i: part.shape.common(anchors[i].shape) for i in owners}
-    if any(shape.isNull() or not shape.Solids or not shape.isValid() for shape in pieces.values()):
-        raise EvaluationError(f"Cannot intersect original bodies with fused region {part.source}")
-    remainder = part.shape.cut(Part.makeCompound([anchors[i].shape for i in owners]))
-    if not remainder.isValid():
-        raise EvaluationError(f"Cannot partition added material in fused region {part.source}")
-    for addition in remainder.Solids:
-        if addition.Volume <= max(1e-6, 1e-6 * part.shape.Volume):
-            continue
-        contacts = sorted(
-            [
-                (
-                    Part.makeCompound(addition.Shells)
-                    .common(Part.makeCompound(pieces[i].Shells))
-                    .Area,
-                    i,
-                )
-                for i in owners
-            ],
-            reverse=True,
-        )
-        if contacts[0][0] <= 1e-8 or (
-            len(contacts) > 1 and contacts[0][0] <= contacts[1][0] * 1.05
-        ):
-            raise EvaluationError(
-                f"Ambiguous added-material ownership in fused region {part.source}; "
-                "saved Boolean input geometry is required for this representation"
-            )
-        i = contacts[0][1]
-        pieces[i] = pieces[i].fuse(addition)
-    return pieces
-
-
-def regroup_bodies(raw, parts, fragmented, reference=None):
-    """Keep correspondence failures distinct from invalid submitted geometry."""
+def match_clean_bodies(raw, parts, reference=None):
+    """Match saved whole bodies without creating or recovering geometry."""
     role = "reference" if reference is None else "candidate"
     try:
-        return _regroup_bodies(raw, parts, fragmented, reference)
-    except (EvaluationError, Part.OCCError) as exc:
+        return _match_clean_bodies(raw, parts, reference)
+    except (EvaluationError, Part.OCCError, ValueError) as exc:
         raise BodyCorrespondenceError(str(exc), role) from exc
 
 
-def fused_input_owners(anchors, overlaps):
-    """Recognize a saved solid spanning multiple independent original bodies.
-
-    Saved input links establish provenance, not a one-input/one-original mapping.
-    Contained fittings do not establish fusion: each owner must retain substantial
-    material outside each other covered anchor.
-    """
-    owners = [
-        i
-        for i, anchor in enumerate(anchors)
-        if anchor is not None and overlaps[i] > 0.8 * anchor.shape.Volume
-    ]
-    if len(owners) < 2:
-        return []
-    covered = [anchors[i] for i in owners]
-    shared = overlap_matrix(covered, covered)
-    np.fill_diagonal(shared, 0.0)
-    independent = [
-        i
-        for column, i in enumerate(owners)
-        if np.max(shared[:, column]) < 0.8 * anchors[i].shape.Volume
-    ]
-    return independent if len(independent) > 1 else []
-
-
-def _regroup_bodies(raw, parts, fragmented, reference=None):
-    """Return one shape per original body, extra solids, and the ownership map.
-
-    Whole retained bodies use one-to-one assignment. Baked Boolean regions may
-    share an owner, and a small overlap region may belong to multiple originals.
-    Reference geometry also anchors candidate correspondence after requested moves.
-    """
+def _match_clean_bodies(raw, parts, reference=None):
+    """Return saved bodies grouped by original, extras, and saved-input indices."""
     overlaps = overlap_matrix(raw, parts)
-    anchors = raw if reference is None else reference
-    anchor_overlaps = overlaps
     if reference is not None:
-        anchor_overlaps = overlap_matrix(reference, parts)
-        overlaps = np.maximum(overlaps, anchor_overlaps)
+        overlaps = np.maximum(overlaps, overlap_matrix(reference, parts))
     volumes = np.array([body.shape.Volume for body in parts])
     raw_volumes = np.array([body.shape.Volume for body in raw])
     if reference is not None:
         raw_volumes = np.maximum(
             raw_volumes, [body.shape.Volume if body else 0 for body in reference]
         )
-    coverage = overlaps / np.maximum(volumes, 1e-12)
     ownership = [[] for _ in raw]
-    contributions = [[] for _ in raw]
     assigned = set()
-    if fragmented:
-        for j, part in enumerate(parts):
-            best = int(np.argmax(coverage[:, j]))
-            if coverage[best, j] < 0.1:
-                continue
-            owners = [best]
-            for i in range(len(raw)):
-                # Recover shared overlap regions without attributing a large
-                # filled housing to the little fittings that were removed.
-                if i != best and coverage[i, j] >= 0.8 and volumes[j] < 0.2 * raw_volumes[i]:
-                    owners.append(i)
-            competing = [
-                i
-                for i in range(len(raw))
-                if i not in owners
-                and coverage[i, j] > 0.2
-                and overlaps[i, j] > 0.8 * raw_volumes[i]
-            ]
-            if reference is not None:
-                # A verified reference resolves ownership even for a small part
-                # inside a large fused candidate. A fraction-of-fused-volume
-                # cutoff would drop those originals and misclassify their material.
-                competing = [
-                    i
-                    for i, target in enumerate(reference)
-                    if i not in owners
-                    and target is not None
-                    and overlaps[i, j] > 0.8 * target.shape.Volume
-                ]
-            if competing:
-                anchors = [
-                    reference[i] if reference is not None and reference[i] is not None else raw[i]
-                    for i in range(len(raw))
-                ]
-                pieces = partition_fused_part(part, owners + competing, anchors)
-                for i, shape in pieces.items():
-                    ownership[i].append(j)
-                    contributions[i].append(shape)
-                assigned.add(j)
-                continue
-            for i in owners:
-                ownership[i].append(j)
-                contributions[i].append(part.shape)
-            assigned.add(j)
-    elif parts:
-        # A saved "input" may itself be a baked fusion. Recover its owners before
-        # one-to-one matching, which would otherwise mark the other parts deleted.
-        for j, part in enumerate(parts):
-            owners = fused_input_owners(anchors, anchor_overlaps[:, j])
-            if not owners:
-                continue
-            pieces = partition_fused_part(part, owners, anchors)
-            for i, shape in pieces.items():
-                ownership[i].append(j)
-                contributions[i].append(shape)
-            assigned.add(j)
+    if parts:
         quality = overlaps / np.maximum(np.minimum(raw_volumes[:, None], volumes[None, :]), 1e-12)
-        available_rows = [i for i, indices in enumerate(ownership) if not indices]
-        available_columns = [j for j in range(len(parts)) if j not in assigned]
-        rows, columns = linear_sum_assignment(-quality[np.ix_(available_rows, available_columns)])
-        for row, column in zip(rows, columns, strict=False):
-            i, j = available_rows[row], available_columns[column]
+        rows, columns = linear_sum_assignment(-quality)
+        for i, j in zip(rows, columns, strict=False):
             if quality[i, j] >= 0.1:
                 ownership[i].append(int(j))
-                contributions[i].append(parts[j].shape)
                 assigned.add(int(j))
+    # A cut may leave several saved, disjoint pieces of the same original.
+    # Retain the existing solids as an occupancy view; never rebuild a BRep.
+    for j, part in enumerate(parts):
+        if j in assigned:
+            continue
+        owners = np.flatnonzero(overlaps[:, j] / max(volumes[j], 1e-12) > 0.8)
+        if len(owners) != 1:
+            continue
+        i = int(owners[0])
+        if not ownership[i]:
+            continue
+        fraction, _ = sampled_overlap_fraction(part, raw[i], (0.8,))
+        if fraction <= 0.8:
+            continue
+        siblings = [parts[k] for k in ownership[i]]
+        if np.any(overlap_matrix([part], siblings) > max(1e-6, volumes[j] * 1e-8)):
+            continue
+        ownership[i].append(j)
+        assigned.add(j)
     missing = [i for i, indices in enumerate(ownership) if not indices]
     remaining = [j for j in range(len(parts)) if j not in assigned]
     if missing and remaining:
@@ -614,62 +553,59 @@ def _regroup_bodies(raw, parts, fragmented, reference=None):
         rows, columns = linear_sum_assignment(costs)
         for row, column in zip(rows, columns, strict=False):
             cost = costs[row, column]
-            alternatives = np.delete(costs[:, column], row)
-            if cost > 0.3 or np.any(alternatives <= cost + 0.02):
+            # Repeated parts can share descriptors after a requested move.
+            # Keep the one-to-one assignment; final geometry scoring checks
+            # the candidate against the reference in world coordinates.
+            if cost > 0.3:
                 continue
             i, j = missing[row], remaining[column]
             ownership[i].append(j)
-            contributions[i].append(parts[j].shape)
             assigned.add(j)
-    rebuilt = []
-    for i, indices in enumerate(ownership):
-        if not indices:
-            rebuilt.append(None)
-            continue
-        shapes = contributions[i]
-        shape = shapes[0].multiFuse(shapes[1:]) if len(shapes) > 1 else shapes[0].copy()
-        shape = refine_geometry(shape)
-        if shape.isNull() or not shape.isValid() or not shape.Solids:
-            raise EvaluationError(f"Cannot reconstruct original body {i + 1}")
-        rebuilt.append(BodyGeometry(shape, f"Body{i + 1}"))
-    return rebuilt, [part for j, part in enumerate(parts) if j not in assigned], ownership
+    matched = [
+        (
+            BodyGeometry(SpatialShape(parts[j].shape for j in indices), "saved pieces")
+            if len(indices) > 1
+            else parts[indices[0]]
+        )
+        if indices
+        else None
+        for indices in ownership
+    ]
+    return matched, [part for j, part in enumerate(parts) if j not in assigned], ownership
 
 
 def score_assembly(raw_path, reference_path, candidate_path, scorer):
     raw = read_raw_bodies(raw_path)
-    ref_parts, ref_fragmented = read_clean_bodies(reference_path, raw=raw)
-    reference, extra_reference, ref_map = regroup_bodies(raw, ref_parts, ref_fragmented)
-    if extra_reference:
-        raise EvaluationError(
-            f"Reference has {len(extra_reference)} solids without an original-body correspondence"
-        )
-    answer_parts, answer_fragmented = read_clean_bodies(candidate_path, candidate=True, raw=raw)
-    answer, extra_answer, answer_map = regroup_bodies(
-        raw, answer_parts, answer_fragmented, reference
-    )
+    try:
+        ref_parts = read_clean_bodies(reference_path, raw=raw)
+        reference, extra_reference, ref_map = match_clean_bodies(raw, ref_parts)
+        answer_parts = read_clean_bodies(candidate_path, candidate=True, raw=raw)
+        anchors = raw + extra_reference
+        targets = reference + extra_reference
+        originals = raw + [None] * len(extra_reference)
+        answer, extra_answer, answer_map = match_clean_bodies(anchors, answer_parts, targets)
+    except MissingCleanBodiesError as exc:
+        return {
+            "status": "missing_clean_bodies",
+            "score": 0.0,
+            "input_role": exc.input_role,
+            "error": str(exc),
+        }
     results = {}
-    with TemporaryDirectory(prefix="fem-original-bodies-") as directory:
-        for i, (original, target, candidate) in enumerate(
-            zip(raw, reference, answer, strict=False)
-        ):
-            paths = []
-            for role, body in zip(
-                ("raw", "reference", "candidate"), (original, target, candidate), strict=False
-            ):
-                path = Path(directory) / f"{i + 1}_{role}.FCStd"
-                if body is not None:
-                    export_geometry(body.shape, path)
-                paths.append(path if body is not None else None)
-            results[f"Body{i + 1}"] = scorer.score_detailed(*paths)
-            logging.info("Preprocessing: scored original body %d/%d", i + 1, len(raw))
+    for i, (original, target, candidate) in enumerate(zip(originals, targets, answer, strict=True)):
+        results[f"Body{i + 1}"] = scorer._score_shapes(
+            original.shape if original else None,
+            target.shape if target else None,
+            candidate.shape if candidate else None,
+        )
+        logging.info("Preprocessing: scored body %d/%d", i + 1, len(originals))
     for i in range(len(extra_answer)):
         results[f"ExtraBody{i + 1}"] = score_body_edit(False, True)
     return {
         **aggregate_body_scores(results),
         "correspondence": {
             "original_body_count": len(raw),
-            "reference_fragmented": ref_fragmented,
-            "candidate_fragmented": answer_fragmented,
+            "added_reference_body_count": len(extra_reference),
             "reference": ref_map,
             "candidate": answer_map,
             "extra_candidate_body_count": len(extra_answer),

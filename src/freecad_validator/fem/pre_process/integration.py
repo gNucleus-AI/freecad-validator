@@ -1,9 +1,10 @@
-"""Apply trusted preprocessing geometry results to a static FEM report."""
+"""Apply trusted preprocessing geometry results to a FEM report."""
 
 import math
 from copy import deepcopy
 
-from freecad_validator.fem.pre_process.errors import EvaluationError
+from freecad_validator.fem.errors import EvaluationError
+from freecad_validator.fem.pre_process.evidence import preprocessing_score
 from freecad_validator.fem.schema import ScoringReport, grade_from_score
 
 
@@ -44,4 +45,18 @@ def apply_preprocessing_score(report: ScoringReport, geometry_score: float | Non
         f"preprocessing: FEM {report.overall_score:.6f} × geometry {geometry_score:.6f}"
         f" = {combined.overall_score:.6f}/100"
     )
+    return combined
+
+
+def apply_preprocessing_evaluation(report, geometry):
+    """Apply body credit once and retain the full worker result, including errors."""
+    score = preprocessing_score(geometry)
+    combined = apply_preprocessing_score(report, score)
+    if score is None:
+        combined = deepcopy(report)
+        combined.subscores_details["preprocessing"] = {"applicable": False, "evaluation": geometry}
+    else:
+        combined.subscores_details["preprocessing"].update(applicable=True, evaluation=geometry)
+    if geometry.get("status") in ("candidate_invalid", "missing_clean_bodies"):
+        combined.evidence.append(f"preprocessing_{geometry['status']}: {geometry.get('error')}")
     return combined
