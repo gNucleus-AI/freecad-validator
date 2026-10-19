@@ -69,7 +69,7 @@ HERE = Path(__file__).resolve().parent
 FCSTD_ADAPTER = str(HERE / "adapters" / "fcstd.py")
 STEP_ADAPTER = str(HERE / "adapters" / "step.py")
 PREPROCESSING_ADAPTER = str(HERE / "adapters" / "pre_process.py")
-MESH_BUDGET_ADAPTER = str(HERE / "adapters" / "mesh_budget.py")
+MESH_BUDGET_WORKER = str(HERE / "mesh" / "worker.py")
 
 
 class RuntimeEnvironmentError(ExtractionError):
@@ -618,7 +618,7 @@ def _score_step_fcstd(
     if (require_preprocessing or local_budget is not None) and report.overall_score > 0:
         geometry_report = _extract(
             fc,
-            PREPROCESSING_ADAPTER if require_preprocessing else MESH_BUDGET_ADAPTER,
+            PREPROCESSING_ADAPTER if require_preprocessing else MESH_BUDGET_WORKER,
             step_path,
             os.path.join(extract_dir, f"{tag}_preprocessing.json"),
             extra_args=[

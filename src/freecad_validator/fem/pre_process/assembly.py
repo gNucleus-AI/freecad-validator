@@ -22,8 +22,8 @@ from freecad_validator.fem.freecad_io import (
     _is_result_object,
     find_replay_context,
 )
-from freecad_validator.fem.mesh.body_budget import evaluate_local_mesh_budget
 from freecad_validator.fem.mesh.budget import load_case_mesh_budget
+from freecad_validator.fem.mesh.local_budget import evaluate_local_mesh_budget
 from freecad_validator.fem.pre_process.errors import (
     BodyCorrespondenceError,
     CandidateGeometryError,

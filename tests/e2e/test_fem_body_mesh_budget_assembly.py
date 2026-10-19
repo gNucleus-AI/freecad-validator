@@ -19,7 +19,7 @@ import ObjectsFem  # noqa: E402
 import Part  # noqa: E402
 
 from freecad_validator.fem.errors import EvaluationError  # noqa: E402
-from freecad_validator.fem.mesh.body_budget import (  # noqa: E402
+from freecad_validator.fem.mesh.local_budget import (  # noqa: E402
     count_mesh_nodes,
     element_overlaps_bounds,
     target_geometry,
@@ -37,7 +37,7 @@ from freecad_validator.fem.pre_process.geometry_compare.brep_diff.models import 
 )
 from freecad_validator.fem.pre_process.scorer import PreProcessScorer  # noqa: E402
 from freecad_validator.fem.pre_process.spatial import SpatialShape  # noqa: E402
-from freecad_validator.fem.step_interface import MESH_BUDGET_ADAPTER  # noqa: E402
+from freecad_validator.fem.step_interface import MESH_BUDGET_WORKER  # noqa: E402
 
 
 def two_tetrahedra():
@@ -247,14 +247,14 @@ def test_plain_case_reuses_matcher_without_preprocessing_credit(tmp_path, histor
         monkeypatch.setattr(
             sys,
             "argv",
-            [MESH_BUDGET_ADAPTER, str(raw), str(reference), str(candidate), str(output)],
+            [MESH_BUDGET_WORKER, str(raw), str(reference), str(candidate), str(output)],
         )
         with patch.object(
             PreProcessScorer,
             "_score_shapes",
             side_effect=AssertionError("Unexpected geometry scoring"),
         ):
-            runpy.run_path(MESH_BUDGET_ADAPTER, run_name="__main__")
+            runpy.run_path(MESH_BUDGET_WORKER, run_name="__main__")
         worker_report = json.loads(output.read_text())
         assert worker_report["mesh_budget"] == report["mesh_budget"]
         assert worker_report["correspondence"] == report["correspondence"]

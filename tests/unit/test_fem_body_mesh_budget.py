@@ -11,7 +11,7 @@ from freecad_validator.fem.errors import EvaluationError
 from freecad_validator.fem.mesh.budget import load_case_mesh_budget, score_local_node_budget
 from freecad_validator.fem.mesh.integration import apply_local_mesh_budget
 from freecad_validator.fem.step_interface import (
-    MESH_BUDGET_ADAPTER,
+    MESH_BUDGET_WORKER,
     PREPROCESSING_ADAPTER,
     score_step_fcstd,
     score_trusted_payloads,
@@ -167,7 +167,7 @@ def test_case_file_triggers_existing_worker_and_applies_budget_before_multiplier
     )
     assert extract.call_count == 4
     assert extract.call_args.args[1] == (
-        PREPROCESSING_ADAPTER if preprocessing else MESH_BUDGET_ADAPTER
+        PREPROCESSING_ADAPTER if preprocessing else MESH_BUDGET_WORKER
     )
     assert ("preprocessing" in result.subscores_details) == preprocessing
 
