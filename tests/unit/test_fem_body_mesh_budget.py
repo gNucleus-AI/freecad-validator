@@ -187,9 +187,10 @@ def test_missing_budget_worker_data_cannot_award_credit(tmp_path):
             )
 
 
-def test_invalid_candidate_clean_bodies_lose_budget_credit(tmp_path):
+@pytest.mark.parametrize("status", ["missing_clean_bodies", "candidate_invalid"])
+def test_invalid_candidate_clean_bodies_lose_budget_credit(tmp_path, status):
     (tmp_path / "mesh_budget.json").write_text(json.dumps({"local_max": {"Body1": 100}}))
-    evaluation = {"status": "missing_clean_bodies", "score": 0, "input_role": "candidate"}
+    evaluation = {"status": status, "score": 0, "input_role": "candidate"}
     with patch(
         "freecad_validator.fem.step_interface._extract",
         side_effect=[STEP, LABEL, _cand(), evaluation],
@@ -198,3 +199,5 @@ def test_invalid_candidate_clean_bodies_lose_budget_credit(tmp_path):
             "raw.step", str(tmp_path / "reference.FCStd"), "answer.FCStd", extract_dir=str(tmp_path)
         )
     assert result.subscores["mesh_budget"] == 0
+    baseline = score_trusted_payloads(STEP, LABEL, _cand())
+    assert result.overall_score == pytest.approx(baseline.overall_score - 25)

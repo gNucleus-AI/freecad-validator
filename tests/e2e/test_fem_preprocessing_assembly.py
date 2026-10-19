@@ -271,11 +271,15 @@ def test_correspondence_kernel_failure_retains_candidate_context(monkeypatch):
     assert "Cannot reconstruct original body" in str(error.value)
 
 
-def test_correspondence_worker_emits_typed_error_without_score(tmp_path, monkeypatch):
+@pytest.mark.parametrize("role", ["candidate", "reference"])
+@pytest.mark.parametrize("preprocessing", [True, False])
+def test_correspondence_worker_emits_typed_error_without_score(
+    tmp_path, monkeypatch, role, preprocessing
+):
     output = tmp_path / "error.json"
     monkeypatch.setattr(
         "freecad_validator.fem.pre_process.score.score_assembly",
-        Mock(side_effect=BodyCorrespondenceError("ambiguous ownership", "candidate")),
+        Mock(side_effect=BodyCorrespondenceError("ambiguous ownership", role)),
     )
     monkeypatch.setattr(
         sys,
@@ -293,12 +297,20 @@ def test_correspondence_worker_emits_typed_error_without_score(tmp_path, monkeyp
             str(output),
         ],
     )
+    if not preprocessing and role == "candidate":
+        main(require_preprocessing=False)
+        report = json.loads(output.read_text())
+        assert report["status"] == "candidate_invalid"
+        assert report["score"] == 0
+        assert report["input_role"] == "candidate"
+        assert report["error_type"] == "body_correspondence"
+        return
     with pytest.raises(SystemExit) as error:
-        main()
+        main(require_preprocessing=preprocessing)
     assert error.value.code == 1
     report = json.loads(output.read_text())
     assert report["status"] == "evaluation_error"
-    assert report["input_role"] == "candidate"
+    assert report["input_role"] == role
     assert report["error_type"] == "body_correspondence"
     assert "score" not in report
 

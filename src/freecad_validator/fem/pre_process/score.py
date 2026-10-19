@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None, *, require_preprocessing: bool = True) -
                 "error_type": "body_correspondence",
                 "input_role": exc.input_role,
             }
+            if not require_preprocessing and exc.input_role == "candidate":
+                report.update(status="candidate_invalid", score=0.0)
         except (RuntimeError, ValueError, OSError) as exc:
             report = {"status": "evaluation_error", "error": str(exc)}
     else:

@@ -327,6 +327,10 @@ using the same body reader, matcher and node-counting code. Saved analysis
 solids can be used when independent body history is unavailable in those cases.
 Preprocessing tasks still require verified clean-body history. The existing
 `require_preprocessing` flag controls the separate geometry multiplier.
+For cases without preprocessing requirements, candidate body-correspondence
+errors give zero mesh-budget credit while other scoring continues. Reference
+correspondence errors remain evaluation errors. Preprocessing-task error
+handling is unchanged.
 Trusted dictionary-only scoring does not load case files because it has no
 trusted filesystem origin.
 
