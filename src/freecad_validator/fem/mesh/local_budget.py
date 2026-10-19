@@ -182,6 +182,11 @@ def evaluate_local_mesh_budget(budget, reference_path, candidate_path, targets, 
     candidate_bodies = {f"Body{i + 1}": body for i, body in enumerate(answer)}
     candidate_bodies.update({f"ExtraBody{i + 1}": body for i, body in enumerate(extras)})
     body_id, entry = next(iter(budget["local_max"].items()))
+    if reference_bodies.get(body_id) is None:
+        raise EvaluationError(
+            f"Configured local mesh budget target {body_id} is missing from "
+            "the reference body correspondence"
+        )
     geometry = entry.get("geometry") if isinstance(entry, dict) else None
     if geometry is not None:
         verify_target_geometry(body_id, geometry, reference_bodies)
