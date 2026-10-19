@@ -257,6 +257,79 @@ is 1.3 times the reference node count, rounded up to a whole thousand. The
 `mesh_budget_zero_ratio` / `--mesh-budget-ratio` option controls that default
 multiplier; it no longer defines an element-count scoring curve.
 
+To add a local maximum, put `mesh_budget.json` beside the trusted reference FCStd:
+
+```json
+{
+  "local_max": {
+    "Body3": {
+      "max_node_count": 2400,
+      "geometry": {
+        "volume_mm3": 48.0,
+        "center_mm": [1.0, 2.0, 3.0],
+        "bounds_mm": [0.0, 0.0, 0.0, 2.0, 4.0, 6.0]
+      }
+    }
+  }
+}
+```
+
+The default full-credit accuracy tolerances are **5% for displacement** and
+**10% for both von Mises and maximum shear stress**. Stress credit decreases
+linearly between 10% and 20% relative error and reaches zero at 20%.
+
+The existing global node cap remains unchanged. `local_max` specifies exactly
+one target body and its inclusive maximum number of unique mesh nodes. The
+example allows up to 2,400 nodes on `Body3`. This is a maximum, not an expected
+node count: the reference may use fewer nodes, but must be positive and within
+the cap. Only the trusted reference directory is searched. Without this file,
+scoring retains the global budget alone.
+
+`geometry` stores reference measurements in assembly world coordinates:
+volume, center of mass and the axis-aligned bounds ordered as
+`[xmin, ymin, zmin, xmax, ymax, zmax]`. The locator must uniquely identify the
+configured reference body; stale or ambiguous metadata raises an evaluation
+error. The actual saved reference shape, rather than these few scalar values,
+is used by the existing geometric correspondence to match the candidate.
+Names and node numbers are not identity evidence. The compact legacy form
+`"Body3": 2400` remains supported without the extra locator check.
+
+`BodyN` uses the raw STEP's solid order, with reference-added bodies appended,
+as in the preprocessing report. It is not a FreeCAD object name or Boolean
+fragment index. The case author selects the body; candidates cannot change the
+target by renaming objects or moving the reported stress peak. For a hotspot
+budget, select the relevant body using the trusted reference. The grader reuses
+preprocessing geometry correspondence, including renamed, reordered and split
+bodies, rather than trusting submitted labels.
+
+Both the global budget and the configured local maximum must pass for full
+`mesh_budget` credit. A missing target, zero local nodes, or a local count above
+the maximum gives this category zero credit. Other bodies do not receive
+separate budget scores, and there is no 0.5-times lower limit. The category's
+existing weight and global validity gates remain unchanged. Local failure alone
+does not add a whole-submission validity gate. Diagnostics appear under
+`subscores_details.mesh_budget.global` and `.local_max`.
+
+Node attribution inspects saved Tet4/Tet10 connectivity and counts each node
+once within its owning body, including quadratic midnodes. Shared interface
+nodes count in each owning body. Isoparametric element centers and, where
+needed, consistent interior quadrature-point ownership determine attribution.
+Unassigned elements that may intersect the target's bounds still fail local
+credit. Unassigned elements proven to lie outside those bounds do not block
+this target's budget. For curved Tet10 elements, exclusion uses their quadratic
+Bezier control hull, not just their nodes or centroid. Unsupported connectivity
+and orphan nodes remain errors. The grader
+never regenerates geometry or remeshes. Establish a cap from a separately
+prepared engineering mesh and store its measured count in the case file.
+
+Body correspondence also runs for cases without preprocessing requirements,
+using the same body reader, matcher and node-counting code. Saved analysis
+solids can be used when independent body history is unavailable in those cases.
+Preprocessing tasks still require verified clean-body history. The existing
+`require_preprocessing` flag controls the separate geometry multiplier.
+Trusted dictionary-only scoring does not load case files because it has no
+trusted filesystem origin.
+
 Material validation compares all extracted material cards and the number of solids
 assigned to each, allowing equivalent cards to be split or merged. It checks every
 card for physically invalid properties. Assignment matching compares counts, not
@@ -303,7 +376,7 @@ Boolean region/container agreement is now part of continuous setup scoring, not 
 separate hard gate. Intermediate extraction JSON is temporary by default; pass
 `--extract-dir` to retain it.
 
-For preprocessing, install `gnucleus-freecad-validator[preprocess]` in a compatible
+For preprocessing or local mesh budgets, install `gnucleus-freecad-validator[preprocess]` in a compatible
 Python environment. The geometry worker discovers a Python with OCP; it can use a
 separate interpreter when FreeCAD's embedded Python lacks those bindings. In a
 conda FreeCAD environment, use conda's compatible OCP/VTK packages instead of

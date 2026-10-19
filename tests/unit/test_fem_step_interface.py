@@ -17,16 +17,27 @@ from freecad_validator.fem import (
     score_step_fcstd,
     score_trusted_payloads,
 )
+from freecad_validator.fem.metrics import tolerance_band_score
 from freecad_validator.fem.step_interface import (
     FCSTD_ADAPTER,
     ExtractionError,
     _extract,
     _preprocessing_gate_report,
     _run_adapter,
+    build_case,
 )
 from freecad_validator.fem.topology_compare import topology_difference, topology_mismatches
 
 STEP = {"volume_mm3": 1.0e6, "characteristic_length_mm": 387.0, "bbox_mm": [120, 360, 60]}
+
+
+@pytest.mark.parametrize("error,expected", [(0.09, 100), (0.10, 100), (0.15, 50), (0.20, 0)])
+def test_default_stress_accuracy_band(error, expected):
+    case = build_case(STEP, LABEL)
+    for name in ("max_von_mises_MPa", "max_shear_MPa"):
+        tolerance = case.reference["quantities"][name]["tol_rel"]
+        assert tolerance_band_score(error, tolerance) == pytest.approx(expected)
+    assert case.reference["quantities"]["max_displacement_mm"]["tol_rel"] == 0.05
 
 
 @pytest.fixture(autouse=True)

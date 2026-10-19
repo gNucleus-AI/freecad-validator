@@ -7,6 +7,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from freecad_validator.fem.mesh.integration import apply_local_mesh_budget
 from freecad_validator.fem.pre_process.assembly import score_assembly
 from freecad_validator.fem.pre_process.errors import (
     BodyCorrespondenceError,
@@ -18,7 +19,7 @@ from freecad_validator.fem.pre_process.scorer import PreProcessScorer
 from freecad_validator.fem.schema import ScoringReport
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, require_preprocessing: bool = True) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw", required=True)
     parser.add_argument("--reference", help="Reference clean STEP or FCStd")
@@ -66,7 +67,13 @@ def main(argv: list[str] | None = None) -> None:
     scorer = PreProcessScorer(DiffConfig(region_sample_count=args.region_samples))
     if args.assembly:
         try:
-            report = score_assembly(args.raw, args.reference, args.candidate, scorer)
+            report = score_assembly(
+                args.raw,
+                args.reference,
+                args.candidate,
+                scorer,
+                require_preprocessing=require_preprocessing,
+            )
         except CandidateGeometryError as exc:
             report = {"status": "candidate_invalid", "score": 0.0, "error": str(exc)}
         except BodyCorrespondenceError as exc:
@@ -92,6 +99,8 @@ def main(argv: list[str] | None = None) -> None:
         report = asdict(result) if result is not None else {"status": "skipped", "score": None}
     if args.fem_report and report.get("status") != "evaluation_error":
         fem_report = ScoringReport(**json.loads(args.fem_report.read_text(encoding="utf-8")))
+        if "mesh_budget" in report:
+            fem_report = apply_local_mesh_budget(fem_report, report["mesh_budget"])
         combined = apply_preprocessing_score(fem_report, report["score"])
         report = {
             "geometry": report,

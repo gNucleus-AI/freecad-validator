@@ -36,7 +36,8 @@ from typing import Any
 from freecad_validator._freecad_loader import resolve_freecad_command
 from freecad_validator.fem.errors import ExtractionError as ExtractionError
 from freecad_validator.fem.label_scoring import score_label_submission, validate_reference
-from freecad_validator.fem.mesh_budget import default_node_cap
+from freecad_validator.fem.mesh.budget import default_node_cap, load_case_mesh_budget
+from freecad_validator.fem.mesh.integration import apply_local_mesh_budget
 from freecad_validator.fem.pre_process.integration import (
     apply_preprocessing_evaluation,
     apply_preprocessing_score,
@@ -68,6 +69,7 @@ HERE = Path(__file__).resolve().parent
 FCSTD_ADAPTER = str(HERE / "adapters" / "fcstd.py")
 STEP_ADAPTER = str(HERE / "adapters" / "step.py")
 PREPROCESSING_ADAPTER = str(HERE / "adapters" / "pre_process.py")
+MESH_BUDGET_ADAPTER = str(HERE / "adapters" / "mesh_budget.py")
 
 
 class RuntimeEnvironmentError(ExtractionError):
@@ -560,6 +562,7 @@ def _score_step_fcstd(
     max_node_count: int | None,
 ) -> ScoringReport:
     fc = freecad_cmd
+    local_budget = load_case_mesh_budget(fcstd_path_reference)
     os.makedirs(extract_dir, exist_ok=True)
     tag = os.path.splitext(os.path.basename(fcstd_path_candidate))[0]
     step_geom = _extract(
@@ -612,10 +615,10 @@ def _score_step_fcstd(
         max_node_count=max_node_count,
     )
     report.runtime_provenance = dict(runtime_provenance)
-    if require_preprocessing and report.overall_score > 0:
+    if (require_preprocessing or local_budget is not None) and report.overall_score > 0:
         geometry_report = _extract(
             fc,
-            PREPROCESSING_ADAPTER,
+            PREPROCESSING_ADAPTER if require_preprocessing else MESH_BUDGET_ADAPTER,
             step_path,
             os.path.join(extract_dir, f"{tag}_preprocessing.json"),
             extra_args=[
@@ -624,7 +627,22 @@ def _score_step_fcstd(
             ],
             timeout_seconds=timeout_seconds,
         )
-        return apply_preprocessing_evaluation(report, geometry_report)
+        if local_budget is not None:
+            status = geometry_report.get("status")
+            if status == "candidate_invalid" or (
+                status == "missing_clean_bodies"
+                and geometry_report.get("input_role") == "candidate"
+            ):
+                budget_evaluation = {
+                    "score": 0.0,
+                    "status": status,
+                    "error": geometry_report.get("error"),
+                }
+            else:
+                budget_evaluation = geometry_report.get("mesh_budget")
+            report = apply_local_mesh_budget(report, budget_evaluation)
+        if require_preprocessing:
+            return apply_preprocessing_evaluation(report, geometry_report)
     return report
 
 
@@ -648,6 +666,10 @@ def score_step_fcstd(
     FreeCAD and CalculiX are required and execute in subprocesses. Run this API
     in an isolated container when the candidate FCStd is untrusted. A missing or
     broken runtime raises :class:`RuntimeEnvironmentError` before scoring.
+
+    A trusted ``mesh_budget.json`` beside the reference FCStd enables a local_max
+    node cap for one configured body, reusing preprocessing correspondence. Candidate directories
+    are not searched. Without this case file, the global node cap is unchanged.
     """
     if timeout_seconds <= 0.0:
         raise ValueError("timeout_seconds must be positive")
