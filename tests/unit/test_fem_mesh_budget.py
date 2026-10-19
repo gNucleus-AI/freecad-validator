@@ -2,7 +2,7 @@
 
 import pytest
 
-from freecad_validator.fem.mesh_budget import default_node_cap
+from freecad_validator.fem.mesh.budget import default_node_cap
 
 
 @pytest.mark.parametrize(

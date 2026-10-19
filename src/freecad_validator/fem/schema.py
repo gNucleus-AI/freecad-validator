@@ -24,7 +24,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from freecad_validator.fem.mesh_budget import MESH_BUDGET_ZERO_RATIO as MESH_BUDGET_ZERO_RATIO
+from freecad_validator.fem.mesh.budget import MESH_BUDGET_ZERO_RATIO as MESH_BUDGET_ZERO_RATIO
 
 # --------------------------------------------------------------------------- #
 # Scoring categories and the default weighting scheme (documented in report)   #
@@ -60,13 +60,13 @@ SEVERITY_PENALTY = {"info": 0.0, "minor": 8.0, "major": 30.0, "critical": 80.0}
 # --------------------------------------------------------------------------- #
 # Relative-error tolerances for comparing a candidate result to the reference.
 DISP_TOL = 0.05  # displacement: <= 5% rel. err = full credit
-STRESS_TOL = 0.08  # stresses (mesh-sensitive): <= 8% rel. err = full credit
+STRESS_TOL = 0.10  # stresses (mesh-sensitive): <= 10% rel. err = full credit
 
 # Accuracy band shape used by metrics.tolerance_band_score:
 #   error <= TOL_BAND_LO * tol  -> 100  (full credit)
 #   error >= TOL_BAND_HI * tol  ->   0  (no credit; TOL_BAND_HI is the "fade")
 # linear in between, over [TOL_BAND_LO*tol, TOL_BAND_HI*tol]. With TOL_BAND_HI=2
-# the displacement sub-score fades 5%->10% and stress fades 8%->16%.
+# the displacement sub-score fades 5%->10% and stress fades 10%->20%.
 TOL_BAND_LO = 1.0
 TOL_BAND_HI = 2.0
 

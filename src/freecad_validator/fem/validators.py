@@ -16,7 +16,7 @@ import math
 from typing import Any
 
 from freecad_validator.fem import metrics
-from freecad_validator.fem.mesh_budget import node_budget_score
+from freecad_validator.fem.mesh.budget import node_budget_score
 from freecad_validator.fem.schema import (
     LOAD_DIR_ALIGNED_DEG,
     LOAD_DIR_GATE_DEG,

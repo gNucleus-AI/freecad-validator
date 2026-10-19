@@ -1,7 +1,8 @@
 """Automatic original-body correspondence for saved preprocessing assemblies.
 
-Require verified saved pre-Boolean clean bodies. Never reconstruct bodies from
-analysis fragments or fused results. Names, labels and visibility are not
+Preprocessing tasks require verified saved pre-Boolean clean bodies. Ordinary
+analysis tasks may read saved analysis solids directly. Never reconstruct bodies
+from fragments or fused results. Names, labels and visibility are not
 correspondence evidence; all geometry stays in world coordinates.
 """
 
@@ -21,6 +22,8 @@ from freecad_validator.fem.freecad_io import (
     _is_result_object,
     find_replay_context,
 )
+from freecad_validator.fem.mesh.budget import load_case_mesh_budget
+from freecad_validator.fem.mesh.local_budget import evaluate_local_mesh_budget
 from freecad_validator.fem.pre_process.errors import (
     BodyCorrespondenceError,
     CandidateGeometryError,
@@ -285,8 +288,13 @@ def detached_clean_bodies(doc, analysis, raw, path, role, error_type):
     return [body for parts in saved.values() for body in parts]
 
 
-def read_clean_bodies(path, *, candidate=False, raw=None):
-    """Read saved clean bodies; missing history never falls back to analysis regions."""
+def read_clean_bodies(path, *, candidate=False, raw=None, require_preprocessing=True):
+    """Read saved bodies using the existing task's preprocessing requirement.
+
+    Preprocessing tasks require independent clean history. Ordinary analysis
+    tasks may use saved analysis solids when no verified history is available.
+    Both modes use the same geometry validation and body correspondence.
+    """
     path = Path(path)
     role = "candidate" if candidate else "reference"
     error_type = CandidateGeometryError if candidate else EvaluationError
@@ -348,6 +356,8 @@ def read_clean_bodies(path, *, candidate=False, raw=None):
             bodies = verified_detached_bodies(doc, link, analyzed, raw, path, role, error_type)
             if bodies is not None:
                 return bodies
+            if not require_preprocessing:
+                return analyzed_bodies
             raise MissingCleanBodiesError(
                 "No verified independent pre-Boolean clean bodies are saved",
                 role,
@@ -574,17 +584,24 @@ def _match_clean_bodies(raw, parts, reference=None):
     return matched, [part for j, part in enumerate(parts) if j not in assigned], ownership
 
 
-def score_assembly(raw_path, reference_path, candidate_path, scorer):
+def score_assembly(raw_path, reference_path, candidate_path, scorer, *, require_preprocessing=True):
+    budget = load_case_mesh_budget(reference_path)
     raw = read_raw_bodies(raw_path)
     try:
-        ref_parts = read_clean_bodies(reference_path, raw=raw)
+        ref_parts = read_clean_bodies(
+            reference_path, raw=raw, require_preprocessing=require_preprocessing
+        )
         reference, extra_reference, ref_map = match_clean_bodies(raw, ref_parts)
-        answer_parts = read_clean_bodies(candidate_path, candidate=True, raw=raw)
+        answer_parts = read_clean_bodies(
+            candidate_path, candidate=True, raw=raw, require_preprocessing=require_preprocessing
+        )
         anchors = raw + extra_reference
         targets = reference + extra_reference
         originals = raw + [None] * len(extra_reference)
         answer, extra_answer, answer_map = match_clean_bodies(anchors, answer_parts, targets)
     except MissingCleanBodiesError as exc:
+        if budget is not None and exc.input_role == "reference":
+            raise EvaluationError(f"Cannot validate case mesh budget: {exc}") from exc
         return {
             "status": "missing_clean_bodies",
             "score": 0.0,
@@ -592,16 +609,19 @@ def score_assembly(raw_path, reference_path, candidate_path, scorer):
             "error": str(exc),
         }
     results = {}
-    for i, (original, target, candidate) in enumerate(zip(originals, targets, answer, strict=True)):
-        results[f"Body{i + 1}"] = scorer._score_shapes(
-            original.shape if original else None,
-            target.shape if target else None,
-            candidate.shape if candidate else None,
-        )
-        logging.info("Preprocessing: scored body %d/%d", i + 1, len(originals))
-    for i in range(len(extra_answer)):
-        results[f"ExtraBody{i + 1}"] = score_body_edit(False, True)
-    return {
+    if require_preprocessing:
+        for i, (original, target, candidate) in enumerate(
+            zip(originals, targets, answer, strict=True)
+        ):
+            results[f"Body{i + 1}"] = scorer._score_shapes(
+                original.shape if original else None,
+                target.shape if target else None,
+                candidate.shape if candidate else None,
+            )
+            logging.info("Preprocessing: scored body %d/%d", i + 1, len(originals))
+        for i in range(len(extra_answer)):
+            results[f"ExtraBody{i + 1}"] = score_body_edit(False, True)
+    report = {
         **aggregate_body_scores(results),
         "correspondence": {
             "original_body_count": len(raw),
@@ -611,3 +631,8 @@ def score_assembly(raw_path, reference_path, candidate_path, scorer):
             "extra_candidate_body_count": len(extra_answer),
         },
     }
+    if budget is not None:
+        report["mesh_budget"] = evaluate_local_mesh_budget(
+            budget, reference_path, candidate_path, targets, answer, extra_answer
+        )
+    return report
