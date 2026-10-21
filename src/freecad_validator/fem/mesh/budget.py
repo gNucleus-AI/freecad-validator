@@ -103,7 +103,7 @@ def _unique_keys(pairs):
 
 
 def score_local_node_budget(budget, reference_counts, candidate_counts):
-    """Score the configured body against its inclusive maximum node count."""
+    """Award full local credit through the cap, then log2 decay to zero at twice it."""
     body, entry = next(iter(budget["local_max"].items()))
     cap = entry["max_node_count"] if isinstance(entry, dict) else entry
     reference_count = reference_counts.get(body)
@@ -113,8 +113,13 @@ def score_local_node_budget(budget, reference_counts, candidate_counts):
         raise EvaluationError("Candidate body node counts must be nonnegative integers")
     count = candidate_counts.get(body, 0)
     passed = 0 < count <= cap
+    score = 0.0
+    if passed:
+        score = 100.0
+    elif cap < count < 2 * cap:
+        score = 100.0 * (1.0 - math.log2(count / cap))
     return {
-        "score": 100.0 if passed else 0.0,
+        "score": score,
         "body": body,
         "max_node_count": cap,
         "reference_node_count": reference_count,

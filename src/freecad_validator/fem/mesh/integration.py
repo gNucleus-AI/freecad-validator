@@ -38,6 +38,8 @@ def apply_local_mesh_budget(report, evaluation):
     combined.evidence.append(f"case local_max mesh budget: {score:.6f}/100")
     if score < 100:
         combined.engineering_feedback.append(
-            "The configured body fails local_max; see its node count and allowed maximum."
+            "The configured body loses local mesh-budget credit; see its node count, "
+            "budget and status. Valid local counts above the budget lose credit "
+            "logarithmically, reaching zero at twice the budget."
         )
     return combined
