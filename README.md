@@ -279,10 +279,10 @@ The default full-credit accuracy tolerances are **5% for displacement** and
 linearly between 10% and 20% relative error and reaches zero at 20%.
 
 The existing global node cap remains unchanged. `local_max` specifies exactly
-one target body and its inclusive maximum number of unique mesh nodes. The
-example allows up to 2,400 nodes on `Body3`. This is a maximum, not an expected
-node count: the reference may use fewer nodes, but must be positive and within
-the cap. Only the trusted reference directory is searched. Without this file,
+one target body and its inclusive full-credit budget of unique mesh nodes. The
+example awards full local credit for 1 through 2,400 nodes on `Body3`. The
+reference may use fewer nodes, but must be positive and within the budget.
+Only the trusted reference directory is searched. Without this file,
 scoring retains the global budget alone.
 
 `geometry` stores reference measurements in assembly world coordinates:
@@ -302,12 +302,17 @@ budget, select the relevant body using the trusted reference. The grader reuses
 preprocessing geometry correspondence, including renamed, reordered and split
 bodies, rather than trusting submitted labels.
 
-Both the global budget and the configured local maximum must pass for full
-`mesh_budget` credit. A missing target, zero local nodes, or a local count above
-the maximum gives this category zero credit. Other bodies do not receive
-separate budget scores, and there is no 0.5-times lower limit. The category's
-existing weight and global validity gates remain unchanged. Local failure alone
-does not add a whole-submission validity gate. Diagnostics appear under
+Both the global budget and the configured local budget must pass for full
+`mesh_budget` credit. Above the local budget, local credit decreases as
+`100 * max(0, 1 - log2(candidate_nodes / local_budget))`, reaching zero at twice
+the budget. For example, 3,600 nodes against a 2,400-node budget earns about
+41.50/100 local credit, and 4,800 or more earns zero. A missing target or zero
+local nodes also gives this category zero credit. Other bodies do not receive
+separate budget scores, and there is no 0.5-times lower limit. The category
+receives the lower of global and local credit, at its existing 25% weight in
+reference-based scoring, before any preprocessing multiplier. Global overflow
+still makes the overall score zero; local overflow alone does not add a
+whole-submission validity gate. Diagnostics appear under
 `subscores_details.mesh_budget.global` and `.local_max`.
 
 Node attribution inspects saved Tet4/Tet10 connectivity and counts each node

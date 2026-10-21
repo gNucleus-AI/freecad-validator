@@ -18,11 +18,26 @@ from freecad_validator.fem.step_interface import (
 )
 
 
-@pytest.mark.parametrize("count,expected", [(1, 100), (49, 100), (100, 100), (101, 0), (0, 0)])
-def test_inclusive_local_cap(count, expected):
+@pytest.mark.parametrize(
+    "count,expected",
+    [
+        (0, 0),
+        (1, 100),
+        (49, 100),
+        (100, 100),
+        (101, 98.5644707),
+        (125, 67.8071905),
+        (150, 41.5037499),
+        (199, 0.7231569),
+        (200, 0),
+        (300, 0),
+    ],
+)
+def test_local_budget_logarithmic_decay(count, expected):
     result = score_local_node_budget({"local_max": {"Body1": 100}}, {"Body1": 40}, {"Body1": count})
-    assert result["score"] == expected
+    assert result["score"] == pytest.approx(expected)
     assert result["ratio_to_cap"] == count / 100
+    assert result["status"] == ("within_budget" if 0 < count <= 100 else "outside_budget")
 
 
 def test_only_configured_body_is_scored():
@@ -97,7 +112,9 @@ def test_geometry_locator_is_loaded_and_cap_is_scored(tmp_path):
     }
     (tmp_path / "mesh_budget.json").write_text(json.dumps(budget))
     assert load_case_mesh_budget(tmp_path / "reference.FCStd") == budget
-    assert score_local_node_budget(budget, {"Body1": 40}, {"Body1": 101})["score"] == 0
+    assert score_local_node_budget(budget, {"Body1": 40}, {"Body1": 150})["score"] == pytest.approx(
+        41.5037499
+    )
 
 
 @pytest.mark.parametrize(
@@ -121,22 +138,27 @@ def test_invalid_geometry_locator_is_rejected(tmp_path, key, value):
         load_case_mesh_budget(tmp_path / "reference.FCStd")
 
 
-def test_category_weight_and_global_gate_are_preserved():
+@pytest.mark.parametrize(
+    "count,expected_score,lost_points",
+    [(100, 100, 0), (150, 41.50, 14.624), (200, 0, 25)],
+)
+def test_category_weight_and_global_gate_are_preserved(count, expected_score, lost_points):
     original = score_trusted_payloads(STEP, LABEL, _cand())
     snapshot = deepcopy(original.to_dict())
     evaluation = score_local_node_budget(
-        {"local_max": {"Body1": 100}}, {"Body1": 40}, {"Body1": 101}
+        {"local_max": {"Body1": 100}}, {"Body1": 40}, {"Body1": count}
     )
     result = apply_local_mesh_budget(original, evaluation)
-    assert result.overall_score == pytest.approx(original.overall_score - 25)
-    assert result.subscores["mesh_budget"] == 0
-    assert result.pass_fail_flags["mesh_within_budget"] is False
+    assert result.overall_score == pytest.approx(original.overall_score - lost_points)
+    assert result.subscores["mesh_budget"] == expected_score
+    assert result.pass_fail_flags["mesh_within_budget"] is (count <= 100)
+    assert not result.gates_triggered
     assert original.to_dict() == snapshot
     with pytest.raises(EvaluationError, match="already"):
         apply_local_mesh_budget(result, evaluation)
     gated = score_trusted_payloads(STEP, LABEL, _cand(mesh={"num_nodes": 50000}))
     assert gated.gates_triggered
-    assert apply_local_mesh_budget(gated, {"score": 100}).overall_score == 0
+    assert apply_local_mesh_budget(gated, evaluation).overall_score == 0
 
 
 @pytest.mark.parametrize("preprocessing", [False, True])
@@ -146,7 +168,9 @@ def test_case_file_triggers_existing_worker_and_applies_budget_before_multiplier
     (tmp_path / "mesh_budget.json").write_text('{"local_max": {"Body1": 100}}')
     evaluation = {
         "score": 0.8,
-        "mesh_budget": {"score": 50},
+        "mesh_budget": score_local_node_budget(
+            {"local_max": {"Body1": 100}}, {"Body1": 40}, {"Body1": 150}
+        ),
         "reference_changed_body_count": 5,
         "extra_changed_body_count": 0,
     }
@@ -163,7 +187,7 @@ def test_case_file_triggers_existing_worker_and_applies_budget_before_multiplier
         )
     baseline = score_trusted_payloads(LABEL["geometry"] if preprocessing else STEP, LABEL, _cand())
     assert result.overall_score == pytest.approx(
-        (baseline.overall_score - 12.5) * (0.8 if preprocessing else 1)
+        (baseline.overall_score - 14.624) * (0.8 if preprocessing else 1)
     )
     assert extract.call_count == 4
     assert extract.call_args.args[1] == (
